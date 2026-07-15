@@ -28,10 +28,13 @@ function episodeNumber($c: ChibiGenerator<unknown>) {
   );
 }
 
-// Both URL formats HBO Max uses put the id in the same path segment:
-// /video/{seriesId}/{episodeId}  and  /watch/{id}
+// Pulls the id out of either /video/{seriesId}/{episodeId} or /watch/{id}.
+// Deliberately not a fixed path-segment index: testing the equivalent Prime
+// Video URLs live turned up a locale-prefixed variant (/-/{locale}/detail/{id})
+// that a fixed index would misread, so this reads the id relative to
+// "video/"/"watch/" wherever they land in the path instead.
 function currentId($c: ChibiGenerator<unknown>) {
-  return $c.url().urlPart(4);
+  return $c.url().regex('/(?:video|watch)/([^/?#]+)', 1);
 }
 
 export const HBOMax: PageInterface = {
@@ -47,7 +50,10 @@ export const HBOMax: PageInterface = {
       return $c.or($c.url().contains('/video/').run(), $c.url().contains('/watch/').run()).run();
     },
     getTitle($c) {
-      return $c.querySelector(TITLE_SELECTOR).ifNotReturn().text().trim().run();
+      // Guard on the text itself (not just the element existing) in case the
+      // title node is present-but-empty before playback actually starts, the
+      // same behavior confirmed live on Prime Video's equivalent selector.
+      return $c.querySelector(TITLE_SELECTOR).ifNotReturn().text().trim().ifNotReturn().run();
     },
     getIdentifier($c) {
       // Title-based (not the id parsed out of the URL): that id was only

@@ -43,7 +43,11 @@ export const PrimeVideo: PageInterface = {
       return $c.or($c.url().contains('/watch/').run(), $c.url().contains('/detail/').run()).run();
     },
     getTitle($c) {
-      return $c.querySelector(TITLE_SELECTOR).ifNotReturn().text().trim().run();
+      // The title element is present in the DOM even before playback starts
+      // (empty and hidden) - guard on the text itself, not just the element,
+      // so a bare /detail/ page (not actually playing) is correctly treated
+      // as "not ready yet" instead of an empty title.
+      return $c.querySelector(TITLE_SELECTOR).ifNotReturn().text().trim().ifNotReturn().run();
     },
     getIdentifier($c) {
       // Title-based (not the id in the /watch/ URL): that id is not
@@ -58,7 +62,15 @@ export const PrimeVideo: PageInterface = {
         .run();
     },
     getOverviewUrl($c) {
-      return $c.string(`${domain}/detail/`).concat($c.url().urlPart(4).run()).run();
+      // Prime Video serves the same page under both /detail/{id} and
+      // /-/{locale}/detail/{id} (confirmed live: this site's own "related
+      // titles" links use the locale-prefixed form) - a fixed path-segment
+      // index would only work for one of them, so pull the id out with a
+      // regex that doesn't care what precedes "detail/"/"watch/".
+      return $c
+        .string(`${domain}/detail/`)
+        .concat($c.url().regex('/(?:detail|watch)/([^/?#]+)', 1).run())
+        .run();
     },
     getEpisode($c) {
       return episodeNumber($c).run();
