@@ -112,6 +112,8 @@ export const settingsObj = {
     },
     simklToken: '',
 
+    traktToken: '',
+
     malToken: '',
     malRefresh: '',
 

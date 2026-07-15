@@ -53,6 +53,10 @@ export abstract class SingleAbstract {
     },
     simkl: NaN,
     baka: NaN,
+    trakt: {
+      id: NaN,
+      slug: '',
+    },
   };
 
   protected options: {
@@ -381,6 +385,14 @@ export abstract class SingleAbstract {
         name: 'Simkl',
         icon: 'https://eu.simkl.in/img_favicon/v2/favicon-32x32.png',
         link: `https://simkl.com/${this.type}/${this.ids.simkl}`,
+      });
+    }
+
+    if (this.ids.trakt.id && name !== 'Trakt') {
+      res.push({
+        name: 'Trakt',
+        icon: 'https://trakt.tv/favicon.ico',
+        link: `https://trakt.tv/shows/${this.ids.trakt.slug || this.ids.trakt.id}`,
       });
     }
 
@@ -886,6 +898,7 @@ export abstract class SingleAbstract {
     if (this.ids.kitsu.id && allowed.includes('KITSU')) return `kitsu:${this.ids.kitsu.id}`;
     if (this.ids.simkl && allowed.includes('SIMKL')) return `simkl:${this.ids.simkl}`;
     if (this.ids.baka && allowed.includes('MANGABAKA')) return `mangabaka:${this.ids.baka}`;
+    if (this.ids.trakt.id && allowed.includes('TRAKT')) return `trakt:${this.ids.trakt.id}`;
     return this.ids.mal;
   }
 

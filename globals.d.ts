@@ -26,6 +26,10 @@ declare global {
       id: string;
       secret: string;
     };
+    trakt: {
+      id: string;
+      secret: string;
+    };
   };
 
   interface Window {
