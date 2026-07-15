@@ -31,13 +31,32 @@ export function translateStatus(
 ): any {
   if (malStatus !== null) {
     return (
-      (Object.keys(statusMap) as TraktWatchStatus[]).find(
-        key => statusMap[key] === malStatus,
-      ) ?? 'watching'
+      (Object.keys(statusMap) as TraktWatchStatus[]).find(key => statusMap[key] === malStatus) ??
+      'watching'
     );
   }
   if (!traktStatus) return statusDef.PlanToWatch;
   return statusMap[traktStatus] ?? statusDef.NoState;
+}
+
+/**
+ * Single source of truth for turning Trakt's raw signals (episodes watched,
+ * episodes aired, watchlist membership) into a watch status. Used by both the
+ * single-item sync and the bulk list sync so an entry never shows a
+ * different status depending on which one read it.
+ */
+export function deriveWatchStatus(params: {
+  completedEpisodes: number;
+  totalAired: number;
+  inWatchlist: boolean;
+}): TraktWatchStatus {
+  const { completedEpisodes, totalAired, inWatchlist } = params;
+  if (completedEpisodes > 0 && totalAired > 0 && completedEpisodes >= totalAired) {
+    return 'completed';
+  }
+  if (completedEpisodes > 0) return 'watching';
+  if (inWatchlist) return 'plantowatch';
+  return 'plantowatch';
 }
 
 // ─── Cache key ────────────────────────────────────────────────────────────────
@@ -49,34 +68,74 @@ export function getCacheKey(malId: number | null, traktId: number): number | str
   return malId;
 }
 
-// ─── ID Mapping: MAL ↔ Trakt (via TMDB intermediary) ────────────────────────
+// ─── ID Mapping: MAL ↔ Trakt (via TMDB, cross-referenced through Simkl) ───────
+//
+// Trakt has no concept of MAL IDs and models anime as western TV shows: one
+// show per franchise, split into numbered seasons (sourced from TVDB/TMDB).
+// MAL instead gives each season of a franchise its own, separate entry ID.
+// `GET /search/id?mal=X` on Simkl only returns Simkl's own ID - to learn which
+// Trakt/TVDB season number a given MAL entry actually corresponds to, we need
+// the extended anime lookup below, which exposes `mapped_tvdb_seasons`.
+// Getting this wrong doesn't just mis-report progress: writing episode
+// history to the wrong season would corrupt the user's real Trakt data for a
+// *different* season of the same franchise.
 
-async function malToTmdb(malId: number, type: 'anime' | 'manga'): Promise<number | null> {
-  if (type === 'manga') return null;
+const SIMKL_HEADERS = {
+  'simkl-api-key': __MAL_SYNC_KEYS__.simkl.id,
+  'Content-Type': 'application/json',
+};
 
-  const cacheObj = new Cache(`trakt/malToTmdb/${malId}`, 30 * 24 * 60 * 60 * 1000);
-  if (await cacheObj.hasValue()) return cacheObj.getValue();
-
-  const response = await api.request.xhr('GET', {
-    url: `https://api.simkl.com/search/id?mal=${malId}`,
-    headers: {
-      'simkl-api-key': __MAL_SYNC_KEYS__.simkl.id,
-      'Content-Type': 'application/json',
-    },
-  });
-
-  if (response.status !== 200) return null;
-  const data = parseJson(response.responseText);
-  if (!Array.isArray(data) || !data.length) return null;
-
-  const tmdbId = data[0] && data[0].ids && data[0].ids.tmdb ? Number(data[0].ids.tmdb) : null;
-  if (tmdbId) await cacheObj.setValue(tmdbId);
-  return tmdbId;
+interface SimklAnimeXref {
+  malId: number | null;
+  tmdbId: number | null;
+  /** Trakt/TVDB season numbers this Simkl anime entry maps to (defaults to [1] when Simkl has no mapping). */
+  seasons: number[];
 }
 
-async function tmdbToTrakt(
-  tmdbId: number,
-): Promise<{ traktId: number; slug: string } | null> {
+async function simklIdByMal(malId: number): Promise<number | null> {
+  const response = await api.request.xhr('GET', {
+    url: `https://api.simkl.com/search/id?mal=${malId}`,
+    headers: SIMKL_HEADERS,
+  });
+  if (response.status !== 200) return null;
+  const data = parseJson(response.responseText);
+  const simklId = Array.isArray(data) && data[0] && data[0].ids ? data[0].ids.simkl : null;
+  return simklId ? Number(simklId) : null;
+}
+
+async function simklIdByTmdb(tmdbId: number): Promise<number | null> {
+  const response = await api.request.xhr('GET', {
+    url: `https://api.simkl.com/search/id?tmdb=${tmdbId}&type=tv`,
+    headers: SIMKL_HEADERS,
+  });
+  if (response.status !== 200) return null;
+  const data = parseJson(response.responseText);
+  const simklId = Array.isArray(data) && data[0] && data[0].ids ? data[0].ids.simkl : null;
+  return simklId ? Number(simklId) : null;
+}
+
+async function simklAnimeXref(simklId: number): Promise<SimklAnimeXref | null> {
+  const response = await api.request.xhr('GET', {
+    url: `https://api.simkl.com/anime/${simklId}?extended=full`,
+    headers: SIMKL_HEADERS,
+  });
+  if (response.status !== 200) return null;
+  const data = parseJson(response.responseText);
+  if (!data || !data.ids) return null;
+
+  const seasons =
+    Array.isArray(data.mapped_tvdb_seasons) && data.mapped_tvdb_seasons.length
+      ? data.mapped_tvdb_seasons.map(Number)
+      : [1];
+
+  return {
+    malId: data.ids.mal ? Number(data.ids.mal) : null,
+    tmdbId: data.ids.tmdb ? Number(data.ids.tmdb) : null,
+    seasons,
+  };
+}
+
+async function tmdbToTrakt(tmdbId: number): Promise<{ traktId: number; slug: string } | null> {
   const cacheObj = new Cache(`trakt/tmdbToTrakt/${tmdbId}`, 30 * 24 * 60 * 60 * 1000);
   if (await cacheObj.hasValue()) return cacheObj.getValue();
 
@@ -101,13 +160,42 @@ async function tmdbToTrakt(
   return result;
 }
 
+export interface TraktIdMapping {
+  traktId: number;
+  slug: string;
+  /** Which Trakt season number(s) this specific MAL entry corresponds to. */
+  seasons: number[];
+}
+
 export async function malToTrakt(
   malId: number,
   type: 'anime' | 'manga',
-): Promise<{ traktId: number; slug: string } | null> {
-  const tmdbId = await malToTmdb(malId, type);
-  if (!tmdbId) return null;
-  return tmdbToTrakt(tmdbId);
+): Promise<TraktIdMapping | null> {
+  if (type === 'manga') return null;
+
+  const cacheObj = new Cache(`trakt/malToTrakt/${malId}`, 30 * 24 * 60 * 60 * 1000);
+  if (await cacheObj.hasValue()) return cacheObj.getValue();
+
+  const simklId = await simklIdByMal(malId);
+  if (!simklId) return null;
+
+  const xref = await simklAnimeXref(simklId);
+  if (!xref || !xref.tmdbId) return null;
+
+  const traktInfo = await tmdbToTrakt(xref.tmdbId);
+  if (!traktInfo) return null;
+
+  const result: TraktIdMapping = { ...traktInfo, seasons: xref.seasons };
+  await cacheObj.setValue(result);
+  return result;
+}
+
+export async function tmdbToMal(tmdbId: number): Promise<number | null> {
+  const simklId = await simklIdByTmdb(tmdbId);
+  if (!simklId) return null;
+
+  const xref = await simklAnimeXref(simklId);
+  return xref ? xref.malId : null;
 }
 
 export async function traktSlugToMal(slug: string): Promise<number | null> {
@@ -128,24 +216,55 @@ export async function traktSlugToMal(slug: string): Promise<number | null> {
   const tmdbId = show && show.ids && show.ids.tmdb ? Number(show.ids.tmdb) : null;
   if (!tmdbId) return null;
 
-  const simklResponse = await api.request.xhr('GET', {
-    url: `https://api.simkl.com/search/id?tmdb=${tmdbId}&type=tv`,
-    headers: {
-      'simkl-api-key': __MAL_SYNC_KEYS__.simkl.id,
-      'Content-Type': 'application/json',
-    },
-  });
-
-  if (simklResponse.status !== 200) return null;
-  const simklData = parseJson(simklResponse.responseText);
-  if (!Array.isArray(simklData) || !simklData.length) return null;
-
-  const malId =
-    simklData[0] && simklData[0].ids && simklData[0].ids.mal
-      ? Number(simklData[0].ids.mal)
-      : null;
+  const malId = await tmdbToMal(tmdbId);
   if (malId) await cacheObj.setValue(malId);
   return malId;
+}
+
+// ─── Flat episode number ↔ (season, episode) ─────────────────────────────────
+//
+// MALSync tracks progress as one flat episode counter per entry. Trakt needs
+// a season number for every episode it marks watched. These helpers translate
+// between the two using each mapped season's known episode count, so entries
+// that map to more than one Trakt season (rare, but possible when MAL groups
+// seasons together differently than Trakt/TVDB does) still mark history
+// against the right season instead of always season 1.
+
+export interface SeasonEpisodeCount {
+  number: number;
+  /** Known episode count for this season; Infinity when unknown (single-season fallback). */
+  episodeCount: number;
+}
+
+export function mapFlatEpisodeToSeason(
+  flatEpisode: number,
+  seasonsMeta: SeasonEpisodeCount[],
+): { season: number; episode: number } | null {
+  let offset = 0;
+  for (let i = 0; i < seasonsMeta.length; i++) {
+    const s = seasonsMeta[i];
+    if (flatEpisode <= offset + s.episodeCount) {
+      return { season: s.number, episode: flatEpisode - offset };
+    }
+    offset += s.episodeCount;
+  }
+  return null;
+}
+
+/** Groups every flat episode number in [from, to] by the Trakt season it belongs to. */
+export function groupFlatEpisodesBySeason(
+  from: number,
+  to: number,
+  seasonsMeta: SeasonEpisodeCount[],
+): Map<number, number[]> {
+  const grouped = new Map<number, number[]>();
+  for (let i = from; i <= to; i++) {
+    const mapped = mapFlatEpisodeToSeason(i, seasonsMeta);
+    if (!mapped) continue;
+    if (!grouped.has(mapped.season)) grouped.set(mapped.season, []);
+    (grouped.get(mapped.season) as number[]).push(mapped.episode);
+  }
+  return grouped;
 }
 
 // ─── OAuth ────────────────────────────────────────────────────────────────────
@@ -202,6 +321,7 @@ export async function call(
   asParameter = false,
   method: 'GET' | 'POST' | 'DELETE' | 'PUT' = 'GET',
   login = true,
+  retried = false,
 ): Promise<any> {
   const logger = con.m('Trakt', '#ed1c24').m('call');
 
@@ -212,9 +332,8 @@ export async function call(
   }
 
   const fullUrl = url.startsWith('http') ? url : `${apiBase}${url}`;
-  const finalUrl = asParameter && sData
-    ? `${fullUrl}?${new URLSearchParams(Object.entries(sData))}`
-    : fullUrl;
+  const finalUrl =
+    asParameter && sData ? `${fullUrl}?${new URLSearchParams(Object.entries(sData))}` : fullUrl;
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -234,9 +353,9 @@ export async function call(
     data: method !== 'GET' && !asParameter ? JSON.stringify(sData) : undefined,
   });
 
-  if (response.status === 401 && login && token && token.refresh_token) {
+  if (response.status === 401 && login && token && token.refresh_token && !retried) {
     await refreshToken(token.refresh_token);
-    return this.call(url, sData, asParameter, method, login);
+    return this.call(url, sData, asParameter, method, login, true);
   }
 
   this.errorHandling(null, response.status);
@@ -270,7 +389,8 @@ export interface TraktCachedShow {
   title: string;
   year: number;
   tmdbId: number | null;
-  watchedEpisodes: number; // approximated from `plays`
+  watchedEpisodes: number; // approximated from `plays`, summed across all seasons
+  totalAired: number; // 0 when unknown - never treat as a real "0 episodes"
   inWatchlist: boolean;
   userRating: number | null;
   lastWatchedAt: string | null;
@@ -293,9 +413,7 @@ export async function syncList(lazy = false): Promise<Record<number, TraktCached
   const lastCheck = await api.storage.get('traktLastCheck');
 
   const newTimestamp =
-    lastActivities && lastActivities.episodes
-      ? lastActivities.episodes.watched_at
-      : null;
+    lastActivities && lastActivities.episodes ? lastActivities.episodes.watched_at : null;
 
   if (lastCheck && newTimestamp && lastCheck === newTimestamp && cacheList) {
     logger.log('Trakt list up to date');
@@ -304,9 +422,11 @@ export async function syncList(lazy = false): Promise<Record<number, TraktCached
 
   logger.log('Fetching Trakt list');
 
-  // Fetch watched shows, watchlist and ratings in parallel
+  // Fetch watched shows, watchlist and ratings in parallel. `extended=full` on
+  // watched shows is required to get `aired_episodes`, otherwise we can never
+  // tell "completed" apart from "still watching" in the bulk list view.
   const [watched, watchlist, ratings] = await Promise.all([
-    this.call('/users/me/watched/shows'),
+    this.call('/users/me/watched/shows', { extended: 'full' }, true),
     this.call('/users/me/watchlist/shows'),
     this.call('/users/me/ratings/shows'),
   ]);
@@ -349,6 +469,7 @@ export async function syncList(lazy = false): Promise<Record<number, TraktCached
         year: Number(entry.show.year),
         tmdbId: entry.show.ids.tmdb ? Number(entry.show.ids.tmdb) : null,
         watchedEpisodes: Number(entry.plays) || 0,
+        totalAired: Number(entry.show.aired_episodes) || 0,
         inWatchlist: watchlistSet.has(traktId),
         userRating: ratingMap[traktId] ?? null,
         lastWatchedAt: entry.last_watched_at ?? null,
@@ -371,6 +492,7 @@ export async function syncList(lazy = false): Promise<Record<number, TraktCached
           year: Number(entry.show.year),
           tmdbId: entry.show.ids.tmdb ? Number(entry.show.ids.tmdb) : null,
           watchedEpisodes: 0,
+          totalAired: Number(entry.show.aired_episodes) || 0,
           inWatchlist: true,
           userRating: ratingMap[traktId] ?? null,
           lastWatchedAt: null,

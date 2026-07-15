@@ -13,9 +13,10 @@ export class UserList extends ListAbstract {
       if (res && res.username) {
         return {
           username: String(res.username),
-          picture: res.images && res.images.avatar && res.images.avatar.full
-            ? String(res.images.avatar.full)
-            : '',
+          picture:
+            res.images && res.images.avatar && res.images.avatar.full
+              ? String(res.images.avatar.full)
+              : '',
           href: `https://trakt.tv/users/${res.username}`,
         };
       }
@@ -54,46 +55,30 @@ export class UserList extends ListAbstract {
     for (let i = 0; i < data.length; i++) {
       const el = data[i];
 
-      // Derive MAL status from Trakt data
-      let derivedStatus: helper.TraktWatchStatus;
-      if (el.inWatchlist && el.watchedEpisodes === 0) {
-        derivedStatus = 'plantowatch';
-      } else if (el.watchedEpisodes > 0) {
-        derivedStatus = 'watching';
-      } else {
-        derivedStatus = 'plantowatch';
-      }
+      // Derive MAL status from Trakt data - same rule as the single-item sync,
+      // so an entry never shows a different status depending on which one
+      // read it.
+      const derivedStatus = helper.deriveWatchStatus({
+        completedEpisodes: el.watchedEpisodes,
+        totalAired: el.totalAired,
+        inWatchlist: el.inWatchlist,
+      });
 
-      const malStatus = parseInt(helper.translateStatus(derivedStatus) as any);
+      const malStatus = parseInt(helper.translateStatus(derivedStatus));
 
       if (status !== definitions.status.All && malStatus !== status) {
         continue;
       }
 
-      // Map TMDB → MAL ID
-      let malId: number | null = null;
-      if (el.tmdbId) {
-        const simklResponse = await api.request
-          .xhr('GET', {
-            url: `https://api.simkl.com/search/id?tmdb=${el.tmdbId}&type=tv`,
-            headers: {
-              'simkl-api-key': __MAL_SYNC_KEYS__.simkl.id,
-              'Content-Type': 'application/json',
-            },
-          })
-          .catch(() => null);
-
-        if (simklResponse && simklResponse.status === 200 && simklResponse.responseText) {
-          try {
-            const simklData = JSON.parse(simklResponse.responseText);
-            if (Array.isArray(simklData) && simklData.length && simklData[0].ids && simklData[0].ids.mal) {
-              malId = Number(simklData[0].ids.mal);
-            }
-          } catch (_e) {
-            // ignore parse errors
-          }
-        }
-      }
+      // Map TMDB → MAL ID. NOTE: a Trakt show that Trakt splits into several
+      // seasons still only produces one row here, resolved to whichever MAL
+      // entry Simkl treats as canonical (usually season 1) - Trakt's bulk
+      // endpoints have no per-season breakdown to disambiguate further, so
+      // watchedEp/totalEp below are the whole franchise's totals, not just
+      // that one season's. The single-item sync path does not have this
+      // limitation.
+      // eslint-disable-next-line no-await-in-loop
+      const malId = el.tmdbId ? await helper.tmdbToMal(el.tmdbId).catch(() => null) : null;
 
       const cacheKey = helper.getCacheKey(malId, el.traktId);
 
@@ -108,7 +93,7 @@ export class UserList extends ListAbstract {
         url: `https://trakt.tv/shows/${el.slug}`,
         score: el.userRating ?? 0,
         watchedEp: el.watchedEpisodes,
-        totalEp: 0, // Trakt doesn't provide total episodes in bulk endpoints
+        totalEp: el.totalAired,
         status: malStatus,
         image: '',
         tags: '',

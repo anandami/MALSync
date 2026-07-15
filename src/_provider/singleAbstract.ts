@@ -56,6 +56,11 @@ export abstract class SingleAbstract {
     trakt: {
       id: NaN,
       slug: '',
+      // Trakt/TVDB season number(s) this specific MAL entry maps to - a MAL
+      // entry is one season of a franchise, Trakt models the whole franchise
+      // as one show split into seasons, so this is required to know which
+      // season's progress belongs to this entry.
+      seasons: [] as number[],
     },
   };
 
