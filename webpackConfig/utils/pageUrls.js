@@ -43,9 +43,6 @@ module.exports = {
   malsyncShiki: {
     match: ['*://malsync.moe/shikimori/oauth*'],
   },
-  malsyncTrakt: {
-    match: ['*://malsync.moe/trakt/oauth*'],
-  },
   malsyncPwa: {
     match: ['*://malsync.moe/pwa*'],
   },

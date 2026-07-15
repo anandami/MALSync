@@ -53,7 +53,33 @@
               ><b>X</b></FormButton
             >
           </div>
-          <FormButton :animation="false" class="provider-item-content">
+          <FormButton
+            v-if="provider.providerType === 'TRAKT' && !traktAuthenticated"
+            :animation="false"
+            class="provider-item-content"
+          >
+            <div>
+              {{ provider.providerType }}
+            </div>
+            <MediaLink color="secondary" :href="traktAuthUrl" target="_blank">
+              {{ lang('settings_listsync_trakt_authlink') }}
+            </MediaLink>
+            <FormText
+              v-model="traktCode"
+              :placeholder="lang('settings_listsync_trakt_placeholder')"
+              class="trakt-code-input"
+            />
+            <FormButton
+              color="primary"
+              padding="mini"
+              :disabled="traktSubmitting || !traktCode.trim()"
+              @click="submitTraktCode()"
+            >
+              {{ lang('settings_listsync_trakt_confirm') }}
+            </FormButton>
+            <div v-if="traktError" class="trakt-auth-error">{{ traktError }}</div>
+          </FormButton>
+          <FormButton v-else :animation="false" class="provider-item-content">
             <div>
               {{ provider.providerType }}
             </div>
@@ -315,6 +341,7 @@ import { createRequest } from '../../utils/reactive';
 import Card from '../card.vue';
 import FormSwitch from '../form/form-switch.vue';
 import FormButton from '../form/form-button.vue';
+import FormText from '../form/form-text.vue';
 import Section from '../section.vue';
 import Spinner from '../spinner.vue';
 import Header from '../header.vue';
@@ -325,6 +352,7 @@ import SettingsGeneral from './settings-general.vue';
 import FormCheckbox from '../form/form-checkbox.vue';
 import { IntlDateTime } from '../../../utils/IntlWrapper';
 import Grid from '../grid.vue';
+import * as traktHelper from '../../../_provider/Trakt/helper';
 
 defineProps({
   title: {
@@ -455,10 +483,44 @@ function isExtension() {
   return api.type === 'webextension';
 }
 
+// Trakt has no MALSync-hosted OAuth callback page to redirect to (unlike
+// MAL/AniList/Shikimori/MangaBaka), so it uses Trakt's own "out-of-band" flow:
+// the user authenticates on trakt.tv, which then displays a code on Trakt's
+// own page for the user to copy and paste here instead of auto-completing
+// via a redirect.
+const traktAuthUrl = traktHelper.getAuthUrl();
+const traktAuthenticated = ref(!!api.settings.get('traktToken'));
+const traktCode = ref('');
+const traktSubmitting = ref(false);
+const traktError = ref('');
+
+async function submitTraktCode() {
+  const code = traktCode.value.trim();
+  if (!code) return;
+
+  traktSubmitting.value = true;
+  traktError.value = '';
+  try {
+    const res = await traktHelper.authRequest({ code });
+    await api.settings.set('traktToken', {
+      access_token: res.access_token,
+      refresh_token: res.refresh_token,
+    });
+    traktAuthenticated.value = true;
+    traktCode.value = '';
+    syncRequest.execute();
+  } catch (e) {
+    traktError.value = e.message || String(e);
+  } finally {
+    traktSubmitting.value = false;
+  }
+}
+
 function deauth(ListProvider) {
   new ListProvider()
     .deauth()
     .then(() => {
+      traktAuthenticated.value = !!api.settings.get('traktToken');
       syncRequest.execute();
     })
     .catch(() => {
@@ -516,6 +578,16 @@ updateBackgroundSyncState();
       color: var(--cl-secondary);
     }
   }
+}
+
+.trakt-code-input {
+  min-width: 180px;
+}
+
+.trakt-auth-error {
+  color: var(--cl-secondary);
+  font-size: @small-text;
+  word-break: break-word;
 }
 
 .listDiff {

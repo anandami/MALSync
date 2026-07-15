@@ -7,7 +7,14 @@ const clientSecret = __MAL_SYNC_KEYS__.trakt.secret;
 
 const apiBase = 'https://api.trakt.tv';
 
-export const redirectUri = 'https://malsync.moe/trakt/oauth';
+// Trakt's "out-of-band" redirect: instead of redirecting to a callback page
+// we control, Trakt displays the authorization code directly on its own
+// success page for the user to copy. This app has no MALSync-hosted page to
+// redirect to (unlike MAL/AniList/Shikimori/MangaBaka, which redirect to a
+// page on malsync.moe - a separate site this extension doesn't control), so
+// the user pastes the code manually. This exact redirect URI must also be
+// set on the app's page at https://trakt.tv/oauth/applications.
+export const redirectUri = 'urn:ietf:wg:oauth:2.0:oob';
 
 export function getAuthUrl(): string {
   return `https://trakt.tv/oauth/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}`;
