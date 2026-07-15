@@ -1144,11 +1144,15 @@
         "description": "List Sync label the size of a list on a specific provider"
     },
     "settings_listsync_trakt_authlink": {
-        "message": "Authenticate on Trakt",
+        "message": "1. Get your code on Trakt",
         "description": "List Sync label for the link that starts Trakt's OAuth flow"
     },
+    "settings_listsync_trakt_hint": {
+        "message": "Log in and approve access - Trakt will show a code on that page. Copy it and paste it below.",
+        "description": "List Sync hint explaining where the Trakt OAuth code comes from"
+    },
     "settings_listsync_trakt_placeholder": {
-        "message": "Paste the code from Trakt here",
+        "message": "2. Paste the code here",
         "description": "List Sync placeholder for the Trakt manual OAuth code input"
     },
     "settings_listsync_trakt_confirm": {

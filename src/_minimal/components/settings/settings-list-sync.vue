@@ -64,6 +64,7 @@
             <MediaLink color="secondary" :href="traktAuthUrl" target="_blank">
               {{ lang('settings_listsync_trakt_authlink') }}
             </MediaLink>
+            <div class="trakt-auth-hint">{{ lang('settings_listsync_trakt_hint') }}</div>
             <FormText
               v-model="traktCode"
               :placeholder="lang('settings_listsync_trakt_placeholder')"
@@ -578,6 +579,12 @@ updateBackgroundSyncState();
       color: var(--cl-secondary);
     }
   }
+}
+
+.trakt-auth-hint {
+  font-size: @small-text;
+  opacity: 0.8;
+  max-width: 220px;
 }
 
 .trakt-code-input {
