@@ -289,7 +289,7 @@ export async function syncList(lazy = false): Promise<Record<number, TraktCached
   }
 
   // Check if Trakt data has changed via last_activities endpoint
-  const lastActivities = await this.call('/sync/last_activities').catch(() => null);
+  const lastActivities = await this.call('/sync/last_activities');
   const lastCheck = await api.storage.get('traktLastCheck');
 
   const newTimestamp =
@@ -306,9 +306,9 @@ export async function syncList(lazy = false): Promise<Record<number, TraktCached
 
   // Fetch watched shows, watchlist and ratings in parallel
   const [watched, watchlist, ratings] = await Promise.all([
-    this.call('/users/me/watched/shows').catch(() => []),
-    this.call('/users/me/watchlist/shows').catch(() => []),
-    this.call('/users/me/ratings/shows').catch(() => []),
+    this.call('/users/me/watched/shows'),
+    this.call('/users/me/watchlist/shows'),
+    this.call('/users/me/ratings/shows'),
   ]);
 
   // Build ratings index by Trakt ID
