@@ -62,6 +62,11 @@ let entry = {
     '..',
     'src/index-webextension/shikiOauth.ts',
   ),
+  'oauth-trakt-script': path.join(
+    __dirname,
+    '..',
+    'src/index-webextension/traktOauth.ts',
+  ),
   'pwa-script': path.join(
     __dirname,
     '..',
