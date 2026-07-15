@@ -1,0 +1,19 @@
+@import './../pages';
+
+@boxBackground: var(--background);
+@boxFontColor: var(--text);
+@boxHighlightBackground: var(--theme);
+@boxHighlightFontColor: var(--background);
+@activeEp: var(--theme);
+@highlightStyle: 1;
+
+#malp {
+  margin: 8px 0;
+
+  #MalData {
+    .malp-group > .malp-group-field,
+    .malp-group > .malp-group-value-section {
+      border: 1px solid @activeEp;
+    }
+  }
+}
