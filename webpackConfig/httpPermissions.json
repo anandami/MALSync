@@ -19,5 +19,7 @@
   "https://api.mangabaka.org/",
   "https://*.mangabaka.org/",
   "https://shikimori.io/",
+  "https://api.trakt.tv/",
+  "https://trakt.tv/",
   "https://*.plex.direct/"
 ]
