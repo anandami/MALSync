@@ -28,7 +28,7 @@ export function getOnlyList(...args) {
   return getListObj(args);
 }
 
-export function getListbyType(syncMode: string, args = []) {
+export function getListbyType(syncMode: string, args: any[] = []) {
   return getListObj(args, syncMode);
 }
 
