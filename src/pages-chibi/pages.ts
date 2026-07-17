@@ -13,6 +13,8 @@ import { toonily } from './implementations/toonily/main';
 import { voidScans } from './implementations/VoidScans/main';
 import { AniXL } from './implementations/AniXL/main';
 import { Crunchyroll } from './implementations/Crunchyroll/main';
+import { PrimeVideo } from './implementations/PrimeVideo/main';
+import { HBOMax } from './implementations/HBOMax/main';
 import { animevost } from './implementations/animevost/main';
 import { FireAnime } from './implementations/FireAnime/main';
 import { WeebCentral } from './implementations/WeebCentral/main';
@@ -125,6 +127,8 @@ export const pages: { [key: string]: PageInterface } = {
   voidScans,
   AniXL,
   Crunchyroll,
+  PrimeVideo,
+  HBOMax,
   animevost,
   FireAnime,
   WeebCentral,
