@@ -116,8 +116,29 @@ export function changeCheck(item, mode) {
         }
       }
       if (normalizeStatus(slave.status) !== normalizeStatus(item.master.status)) {
-        item.diff = true;
-        slave.diff.status = normalizeStatus(item.master.status);
+        // Trakt can only represent watchlist/watching/completed (a status is
+        // derived from watch history, so dropped/on-hold don't exist and a
+        // fully watched title always reads as completed). Compare against the
+        // status Trakt will actually report after a write - otherwise these
+        // entries generate a diff that no amount of syncing can ever clear.
+        if (getType(slave.url) === 'TRAKT') {
+          const masterStatus = normalizeStatus(item.master.status);
+          const targetEp =
+            masterStatus === status.Completed ? slave.totalEp : item.master.watchedEp;
+          let projected = status.PlanToWatch;
+          if (targetEp > 0 && slave.totalEp > 0 && targetEp >= slave.totalEp) {
+            projected = status.Completed;
+          } else if (targetEp > 0) {
+            projected = status.Watching;
+          }
+          if (normalizeStatus(slave.status) !== projected) {
+            item.diff = true;
+            slave.diff.status = masterStatus;
+          }
+        } else {
+          item.diff = true;
+          slave.diff.status = normalizeStatus(item.master.status);
+        }
       }
       if (checkDates && shouldCheckDates(slave)) {
         if (slave.startDate !== item.master.startDate) {
