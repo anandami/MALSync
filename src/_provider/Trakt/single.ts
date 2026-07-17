@@ -12,6 +12,7 @@ export class Single extends SingleAbstract {
 
   private animeInfo: {
     traktId: number;
+    isMovie: boolean;
     slug: string;
     title: string;
     totalEpisodes: number;
@@ -32,16 +33,17 @@ export class Single extends SingleAbstract {
 
   shortName = 'Trakt';
 
-  authenticationUrl = helper.getAuthUrl();
+  authenticationUrl = helper.activateUrl;
 
   protected rewatchingSupport = false;
 
   protected datesSupport = false;
 
   protected handleUrl(url: string): void {
-    if (url.match(/trakt\.tv\/shows\/[^/]+/i)) {
+    if (url.match(/trakt\.tv\/(shows|movies)\/[^/]+/i)) {
       this.type = 'anime';
       this.ids.trakt.slug = utils.urlPart(url, 4);
+      this.ids.trakt.isMovie = utils.urlPart(url, 3) === 'movies';
       return;
     }
     if (url.match(/myanimelist\.net\/(anime|manga)\/\d+/i)) {
@@ -180,6 +182,9 @@ export class Single extends SingleAbstract {
 
   _getDisplayUrl(): string {
     if (this.animeInfo && this.animeInfo.slug) {
+      if (this.animeInfo.isMovie) {
+        return `https://trakt.tv/movies/${this.animeInfo.slug}`;
+      }
       const [season] = this.ids.trakt.seasons;
       const single = this.ids.trakt.seasons.length === 1;
       return single
@@ -209,20 +214,28 @@ export class Single extends SingleAbstract {
         this.ids.trakt.id = traktInfo.traktId;
         this.ids.trakt.slug = traktInfo.slug;
         this.ids.trakt.seasons = traktInfo.seasons;
+        this.ids.trakt.isMovie = !!traktInfo.isMovie;
       }
     } else if (this.ids.trakt.slug && Number.isNaN(this.ids.trakt.id)) {
-      const malId = await helper.traktSlugToMal(this.ids.trakt.slug).catch(() => null);
+      const malId = await helper
+        .traktSlugToMal(this.ids.trakt.slug, this.ids.trakt.isMovie ? 'movie' : 'show')
+        .catch(() => null);
       if (malId) this.ids.mal = malId;
       // Navigating in from a trakt.tv URL only gives us the show slug, and
       // Simkl's reverse lookup always resolves to the franchise's canonical
       // entry - there is no reliable way to know which season the user is
       // actually on, so default to season 1.
-      if (!this.ids.trakt.seasons.length) this.ids.trakt.seasons = [1];
+      if (!this.ids.trakt.isMovie && !this.ids.trakt.seasons.length) this.ids.trakt.seasons = [1];
     }
 
-    // Load cached entry
+    // Load cached entry. Lazy on purpose: during a bulk list sync every item
+    // goes through here, and a non-lazy load would refetch the whole Trakt
+    // library for each item (our own writes change `last_activities`).
     const cached = await this.getSingle(
-      !Number.isNaN(this.ids.trakt.id) ? { trakt: this.ids.trakt.id } : { mal: this.ids.mal },
+      !Number.isNaN(this.ids.trakt.id)
+        ? { trakt: this.ids.trakt.id, isMovie: this.ids.trakt.isMovie }
+        : { mal: this.ids.mal },
+      true,
     ).catch(e => {
       if (e instanceof NotAutenticatedError) {
         this._authenticated = false;
@@ -240,7 +253,9 @@ export class Single extends SingleAbstract {
     // If we still don't have a Trakt ID and have a slug, try to fetch it
     if (Number.isNaN(this.ids.trakt.id) && this.ids.trakt.slug) {
       const showResponse = await api.request.xhr('GET', {
-        url: `https://api.trakt.tv/shows/${this.ids.trakt.slug}?extended=full`,
+        url: `https://api.trakt.tv/${this.ids.trakt.isMovie ? 'movies' : 'shows'}/${
+          this.ids.trakt.slug
+        }?extended=full`,
         headers: {
           'Content-Type': 'application/json',
           'trakt-api-version': '2',
@@ -255,41 +270,53 @@ export class Single extends SingleAbstract {
       }
     }
 
-    if (Number.isNaN(this.ids.trakt.id)) throw new NotFoundError('Trakt: show not found');
-    if (!this.ids.trakt.seasons.length) this.ids.trakt.seasons = [1];
-
-    // Get detailed watch progress, broken down by season
-    const progress = await this.call(`/shows/${this.ids.trakt.id}/progress/watched`).catch(
-      () => null,
-    );
-
-    const mappedSeasons: any[] =
-      progress && Array.isArray(progress.seasons)
-        ? progress.seasons.filter((s: any) => this.ids.trakt.seasons.includes(Number(s.number)))
-        : [];
+    if (Number.isNaN(this.ids.trakt.id)) {
+      throw new NotFoundError('Trakt: no matching show or movie found');
+    }
+    if (!this.ids.trakt.isMovie && !this.ids.trakt.seasons.length) this.ids.trakt.seasons = [1];
 
     let completedEpisodes = 0;
-    if (mappedSeasons.length) {
-      completedEpisodes = mappedSeasons.reduce((sum, s) => sum + (Number(s.completed) || 0), 0);
-    } else if (cached) {
-      completedEpisodes = cached.watchedEpisodes;
+    let totalAired = 0;
+    let seasonsMeta: helper.SeasonEpisodeCount[] = [];
+
+    if (this.ids.trakt.isMovie) {
+      // Movies: exactly one "episode"; watched state comes from the cached
+      // list (which includes watched movies).
+      completedEpisodes = cached && cached.watchedEpisodes > 0 ? 1 : 0;
+      totalAired = 1;
+    } else {
+      // Get detailed watch progress, broken down by season
+      const progress = await this.call(`/shows/${this.ids.trakt.id}/progress/watched`).catch(
+        () => null,
+      );
+
+      const mappedSeasons: any[] =
+        progress && Array.isArray(progress.seasons)
+          ? progress.seasons.filter((s: any) => this.ids.trakt.seasons.includes(Number(s.number)))
+          : [];
+
+      if (mappedSeasons.length) {
+        completedEpisodes = mappedSeasons.reduce((sum, s) => sum + (Number(s.completed) || 0), 0);
+      } else if (cached) {
+        completedEpisodes = cached.watchedEpisodes;
+      }
+
+      totalAired = mappedSeasons.length
+        ? mappedSeasons.reduce((sum, s) => sum + (Number(s.aired) || 0), 0)
+        : 0;
+
+      // Per-season episode counts, used later to translate a flat episode
+      // number back into (season, episode) pairs when writing history. Falls
+      // back to a single, unbounded season when progress couldn't be fetched.
+      seasonsMeta = mappedSeasons.length
+        ? mappedSeasons
+            .map(s => ({
+              number: Number(s.number),
+              episodeCount: Array.isArray(s.episodes) ? s.episodes.length : Number(s.aired) || 0,
+            }))
+            .sort((a, b) => a.number - b.number)
+        : this.ids.trakt.seasons.map(number => ({ number, episodeCount: Infinity }));
     }
-
-    const totalAired = mappedSeasons.length
-      ? mappedSeasons.reduce((sum, s) => sum + (Number(s.aired) || 0), 0)
-      : 0;
-
-    // Per-season episode counts, used later to translate a flat episode
-    // number back into (season, episode) pairs when writing history. Falls
-    // back to a single, unbounded season when progress couldn't be fetched.
-    const seasonsMeta: helper.SeasonEpisodeCount[] = mappedSeasons.length
-      ? mappedSeasons
-          .map(s => ({
-            number: Number(s.number),
-            episodeCount: Array.isArray(s.episodes) ? s.episodes.length : Number(s.aired) || 0,
-          }))
-          .sort((a, b) => a.number - b.number)
-      : this.ids.trakt.seasons.map(number => ({ number, episodeCount: Infinity }));
 
     const derivedStatus = helper.deriveWatchStatus({
       completedEpisodes,
@@ -299,6 +326,7 @@ export class Single extends SingleAbstract {
 
     this.animeInfo = {
       traktId: this.ids.trakt.id,
+      isMovie: this.ids.trakt.isMovie,
       slug: this.ids.trakt.slug,
       title: cached ? cached.title : '',
       totalEpisodes: totalAired,
@@ -331,12 +359,39 @@ export class Single extends SingleAbstract {
       this.animeInfo.watchedEpisodes,
     );
 
+    // Movies and shows use different payload shapes on every /sync endpoint.
+    const isMovie = this.animeInfo.isMovie;
+    const media = isMovie ? 'movies' : 'shows';
+
     // ── Episode history ───────────────────────────────────────────────────────
     if (this.episodeUpdate || !this.isOnList()) {
       const cur = this.animeInfo.watchedEpisodes;
       const last = this.lastSyncedEp;
 
-      if (cur > last) {
+      if (isMovie) {
+        // A movie is either watched (one history entry) or not.
+        if (cur > 0 && last === 0) {
+          const response = await this.call(
+            '/sync/history',
+            {
+              movies: [
+                { ids: { trakt: this.animeInfo.traktId }, watched_at: new Date().toISOString() },
+              ],
+            },
+            false,
+            'POST',
+          );
+          this.logger.log('Movie history add response', response);
+        } else if (cur === 0 && last > 0) {
+          const response = await this.call(
+            '/sync/history/remove',
+            { movies: [{ ids: { trakt: this.animeInfo.traktId } }] },
+            false,
+            'POST',
+          );
+          this.logger.log('Movie history remove response', response);
+        }
+      } else if (cur > last) {
         const now = new Date().toISOString();
         const grouped = helper.groupFlatEpisodesBySeason(last + 1, cur, this.animeInfo.seasonsMeta);
         const seasons = Array.from(grouped.entries()).map(([number, epNumbers]) => ({
@@ -376,7 +431,7 @@ export class Single extends SingleAbstract {
         if (!this.animeInfo.inWatchlist) {
           const response = await this.call(
             '/sync/watchlist',
-            { shows: [{ ids: { trakt: this.animeInfo.traktId } }] },
+            { [media]: [{ ids: { trakt: this.animeInfo.traktId } }] },
             false,
             'POST',
           );
@@ -387,7 +442,7 @@ export class Single extends SingleAbstract {
         // For watching / completed / on-hold / dropped → remove from watchlist
         const response = await this.call(
           '/sync/watchlist/remove',
-          { shows: [{ ids: { trakt: this.animeInfo.traktId } }] },
+          { [media]: [{ ids: { trakt: this.animeInfo.traktId } }] },
           false,
           'POST',
         );
@@ -402,7 +457,7 @@ export class Single extends SingleAbstract {
         const response = await this.call(
           '/sync/ratings',
           {
-            shows: [
+            [media]: [
               {
                 rating: this.animeInfo.userRating,
                 ids: { trakt: this.animeInfo.traktId },
@@ -416,7 +471,7 @@ export class Single extends SingleAbstract {
       } else {
         const response = await this.call(
           '/sync/ratings/remove',
-          { shows: [{ ids: { trakt: this.animeInfo.traktId } }] },
+          { [media]: [{ ids: { trakt: this.animeInfo.traktId } }] },
           false,
           'POST',
         );
@@ -431,6 +486,24 @@ export class Single extends SingleAbstract {
 
   async _delete(): Promise<void> {
     if (!this.animeInfo) throw new Error('Trakt: animeInfo not loaded');
+
+    if (this.animeInfo.isMovie) {
+      await Promise.all([
+        this.call(
+          '/sync/history/remove',
+          { movies: [{ ids: { trakt: this.animeInfo.traktId } }] },
+          false,
+          'POST',
+        ),
+        this.call(
+          '/sync/watchlist/remove',
+          { movies: [{ ids: { trakt: this.animeInfo.traktId } }] },
+          false,
+          'POST',
+        ),
+      ]);
+      return;
+    }
 
     // Omitting `episodes` removes a season's entire history. Scoping this to
     // just the season(s) this MAL entry maps to (instead of the bare show id,

@@ -6,7 +6,7 @@ import * as definitions from '../definitions';
 export class UserList extends ListAbstract {
   name = 'Trakt';
 
-  authenticationUrl = helper.getAuthUrl();
+  authenticationUrl = helper.activateUrl;
 
   async getUserObject(): Promise<{ username: string; picture: string; href: string }> {
     return this.call('/users/me?extended=full').then((res: any) => {
@@ -78,19 +78,21 @@ export class UserList extends ListAbstract {
       // that one season's. The single-item sync path does not have this
       // limitation.
       // eslint-disable-next-line no-await-in-loop
-      const malId = el.tmdbId ? await helper.tmdbToMal(el.tmdbId).catch(() => null) : null;
+      const malId = el.tmdbId
+        ? await helper.tmdbToMal(el.tmdbId, el.isMovie ? 'movie' : 'tv').catch(() => null)
+        : null;
 
-      const cacheKey = helper.getCacheKey(malId, el.traktId);
+      const cacheKey = helper.getCacheKey(malId, el.traktId, el.isMovie);
 
       // eslint-disable-next-line no-await-in-loop
       const tempData = await this.fn({
         malId,
-        apiCacheKey: malId ?? `trakt:${el.traktId}`,
+        apiCacheKey: malId ?? `trakt:${el.isMovie ? 'm' : ''}${el.traktId}`,
         uid: el.traktId,
         cacheKey,
         type: 'anime',
         title: el.title,
-        url: `https://trakt.tv/shows/${el.slug}`,
+        url: `https://trakt.tv/${el.isMovie ? 'movies' : 'shows'}/${el.slug}`,
         score: el.userRating ?? 0,
         watchedEp: el.watchedEpisodes,
         totalEp: el.totalAired,

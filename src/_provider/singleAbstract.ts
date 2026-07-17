@@ -61,6 +61,10 @@ export abstract class SingleAbstract {
       // as one show split into seasons, so this is required to know which
       // season's progress belongs to this entry.
       seasons: [] as number[],
+      // Trakt keeps movies in a separate id/url namespace from shows (their
+      // numeric ids can even collide), so "which namespace" must travel with
+      // the id.
+      isMovie: false,
     },
   };
 
@@ -397,7 +401,9 @@ export abstract class SingleAbstract {
       res.push({
         name: 'Trakt',
         icon: 'https://trakt.tv/favicon.ico',
-        link: `https://trakt.tv/shows/${this.ids.trakt.slug || this.ids.trakt.id}`,
+        link: `https://trakt.tv/${this.ids.trakt.isMovie ? 'movies' : 'shows'}/${
+          this.ids.trakt.slug || this.ids.trakt.id
+        }`,
       });
     }
 
@@ -903,7 +909,8 @@ export abstract class SingleAbstract {
     if (this.ids.kitsu.id && allowed.includes('KITSU')) return `kitsu:${this.ids.kitsu.id}`;
     if (this.ids.simkl && allowed.includes('SIMKL')) return `simkl:${this.ids.simkl}`;
     if (this.ids.baka && allowed.includes('MANGABAKA')) return `mangabaka:${this.ids.baka}`;
-    if (this.ids.trakt.id && allowed.includes('TRAKT')) return `trakt:${this.ids.trakt.id}`;
+    if (this.ids.trakt.id && allowed.includes('TRAKT'))
+      return `trakt:${this.ids.trakt.isMovie ? 'm' : ''}${this.ids.trakt.id}`;
     return this.ids.mal;
   }
 
