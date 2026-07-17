@@ -8,6 +8,10 @@ module.exports = {
     let mangabakaId = 'gkakHAvTRJdSNROnJVeCborCYCqveNSx';
     let mangabakaSecret = 'aSJdQANfWahFBPpqkVqYDYaFzvYjRUJv';
 
+    // Trakt API credentials — https://trakt.tv/oauth/applications
+    let traktId = 'kAB0U5mp1WJzbwmab_7vPzB3m6FlaEwISC7P4jyUIWk';
+    let traktSecret = '41HDqf0Jmmbl38_YYaUrKYvB_uTrFKc1NsrPTCuXa2k';
+
     if (mode === 'travis') {
       if (!process.env.SIMKL_API_ID || !process.env.SIMKL_API_SECRET || !process.env.MANGABAKA_API_ID || !process.env.MANGABAKA_API_SECRET) {
         throw new Error('SIMKL_API_ID, SIMKL_API_SECRET, MANGABAKA_API_ID and MANGABAKA_API_SECRET are not set');
@@ -17,6 +21,11 @@ module.exports = {
       simklSecret = process.env.SIMKL_API_SECRET;
       mangabakaId = process.env.MANGABAKA_API_ID;
       mangabakaSecret = process.env.MANGABAKA_API_SECRET;
+
+      if (process.env.TRAKT_API_ID && process.env.TRAKT_API_SECRET) {
+        traktId = process.env.TRAKT_API_ID;
+        traktSecret = process.env.TRAKT_API_SECRET;
+      }
     }
 
     return {
@@ -27,6 +36,10 @@ module.exports = {
       mangabaka: {
         id: mangabakaId,
         secret: mangabakaSecret,
+      },
+      trakt: {
+        id: traktId,
+        secret: traktSecret,
       },
     }
   }

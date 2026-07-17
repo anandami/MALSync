@@ -41,19 +41,50 @@
           <FormButton v-if="provider.providerSettings.master" :animation="false" color="secondary">
             {{ lang('settings_listsync_master') }}
           </FormButton>
-          <div v-else-if="provider.providerSettings.text === 'Done'" class="provider-item-header">
+          <div v-else-if="isProviderDone(provider)" class="provider-item-header">
             <FormButton :animation="false" color="primary">
               {{ lang('settings_listsync_slave') }}
             </FormButton>
             <FormButton
-              v-if="provider.providerSettings.text === 'Done' && !provider.providerSettings.master"
+              v-if="!provider.providerSettings.master"
               :animation="false"
               color="secondary"
               @click="deauth(provider.listProvider)"
               ><b>X</b></FormButton
             >
           </div>
-          <FormButton :animation="false" class="provider-item-content">
+          <FormButton
+            v-if="provider.providerType === 'TRAKT' && !traktAuthenticated"
+            :animation="false"
+            class="provider-item-content"
+          >
+            <div>
+              {{ provider.providerType }}
+            </div>
+            <FormButton
+              v-if="!traktDevice"
+              color="primary"
+              padding="mini"
+              @click="startTraktAuth()"
+            >
+              {{ lang('settings_listsync_trakt_connect') }}
+            </FormButton>
+            <template v-else>
+              <div class="trakt-user-code">{{ traktDevice.user_code }}</div>
+              <MediaLink color="secondary" :href="traktDevice.verification_url" target="_blank">
+                {{ lang('settings_listsync_trakt_activate') }}
+              </MediaLink>
+              <div class="trakt-auth-hint">{{ lang('settings_listsync_trakt_waiting') }}</div>
+              <div class="trakt-auth-hint">
+                {{ lang('settings_listsync_trakt_expires', [traktCountdownText]) }}
+              </div>
+              <FormButton color="secondary" padding="mini" @click="cancelTraktAuth()">
+                {{ lang('Cancel') }}
+              </FormButton>
+            </template>
+            <div v-if="traktError" class="trakt-auth-error">{{ traktError }}</div>
+          </FormButton>
+          <FormButton v-else :animation="false" class="provider-item-content">
             <div>
               {{ provider.providerType }}
             </div>
@@ -308,7 +339,7 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, reactive, ref } from 'vue';
+import { computed, onUnmounted, reactive, ref } from 'vue';
 import * as sync from '../../../utils/syncHandler';
 import { getStatusText } from '../../../utils/general';
 import { createRequest } from '../../utils/reactive';
@@ -325,6 +356,7 @@ import SettingsGeneral from './settings-general.vue';
 import FormCheckbox from '../form/form-checkbox.vue';
 import { IntlDateTime } from '../../../utils/IntlWrapper';
 import Grid from '../grid.vue';
+import * as traktHelper from '../../../_provider/Trakt/helper';
 
 defineProps({
   title: {
@@ -377,6 +409,11 @@ const syncRequest = createRequest(parameters, async params => {
       list: null,
       master: false,
     },
+    trakt: {
+      text: 'Init',
+      list: null,
+      master: false,
+    },
   });
 
   providerList.value = sync.getListProvider({
@@ -386,6 +423,7 @@ const syncRequest = createRequest(parameters, async params => {
     mangabaka: listProvider.mangabaka,
     simkl: listProvider.simkl,
     shiki: listProvider.shiki,
+    trakt: listProvider.trakt,
   });
 
   const listOptions = await sync.retriveLists(providerList.value, params.value.type, sync.getList);
@@ -449,10 +487,132 @@ function isExtension() {
   return api.type === 'webextension';
 }
 
+// The provider status text is localized (e.g. "Feito" in pt-BR), so the
+// "authenticated" check must compare against the translated string - a
+// literal 'Done' comparison hides the deauth button in every other language.
+function isProviderDone(provider: any) {
+  return provider.providerSettings.text === api.storage.lang('settings_listsync_provider_done');
+}
+
+// Trakt has no MALSync-hosted OAuth callback page to redirect to (unlike
+// MAL/AniList/Shikimori/MangaBaka), so it uses Trakt's DEVICE flow: the
+// extension shows a short code, the user enters it on trakt.tv/activate, and
+// we poll until Trakt reports the approval. The authorization-code flow is
+// not an option here - see the note in _provider/Trakt/helper.ts.
+// Trakt issues device codes valid for 10 minutes, but we cut the wait short
+// locally: a smaller window nudges the user to enter the code right away
+// instead of coming back later to one that Trakt already discarded.
+const TRAKT_CODE_WINDOW_SECONDS = 120;
+
+const traktAuthenticated = ref(!!api.settings.get('traktToken'));
+const traktDevice = ref(null as null | traktHelper.TraktDeviceCode);
+const traktError = ref('');
+const traktSecondsLeft = ref(0);
+let traktPollTimer: ReturnType<typeof setTimeout> | null = null;
+let traktCountdownTimer: ReturnType<typeof setInterval> | null = null;
+let traktDeadline = 0;
+let traktStarting = false;
+
+const traktCountdownText = computed(() => {
+  const min = Math.floor(traktSecondsLeft.value / 60);
+  const sec = traktSecondsLeft.value % 60;
+  return `${min}:${String(sec).padStart(2, '0')}`;
+});
+
+function stopTraktTimers() {
+  if (traktPollTimer !== null) {
+    clearTimeout(traktPollTimer);
+    traktPollTimer = null;
+  }
+  if (traktCountdownTimer !== null) {
+    clearInterval(traktCountdownTimer);
+    traktCountdownTimer = null;
+  }
+}
+
+function endTraktAuth(message = '') {
+  stopTraktTimers();
+  traktDevice.value = null;
+  traktError.value = message;
+}
+
+function startTraktCountdown() {
+  traktSecondsLeft.value = Math.max(0, Math.round((traktDeadline - Date.now()) / 1000));
+  traktCountdownTimer = setInterval(() => {
+    traktSecondsLeft.value = Math.max(0, Math.round((traktDeadline - Date.now()) / 1000));
+  }, 1000);
+}
+
+function scheduleTraktPoll(delayMs: number) {
+  if (traktPollTimer !== null) clearTimeout(traktPollTimer);
+  traktPollTimer = setTimeout(async () => {
+    if (!traktDevice.value) return;
+    if (Date.now() > traktDeadline) {
+      endTraktAuth(api.storage.lang('settings_listsync_trakt_expired'));
+      return;
+    }
+    try {
+      const result = await traktHelper.pollDeviceToken(traktDevice.value.device_code);
+      // 'network' = connection hiccup; the code is still valid on Trakt's
+      // side, so keep polling until the code's own deadline instead of
+      // killing the flow.
+      if (result === 'pending' || result === 'network') {
+        scheduleTraktPoll(delayMs);
+        return;
+      }
+      if (result === 'slow_down') {
+        scheduleTraktPoll(delayMs + 5000);
+        return;
+      }
+      if (result === 'code_dead') {
+        endTraktAuth(api.storage.lang('settings_listsync_trakt_expired'));
+        return;
+      }
+      if (result === 'denied') {
+        endTraktAuth(api.storage.lang('settings_listsync_trakt_denied'));
+        return;
+      }
+      await api.settings.set('traktToken', {
+        access_token: result.access_token,
+        refresh_token: result.refresh_token,
+      });
+      endTraktAuth();
+      traktAuthenticated.value = true;
+      syncRequest.execute();
+    } catch (e) {
+      endTraktAuth(e.message || String(e));
+    }
+  }, delayMs);
+}
+
+async function startTraktAuth() {
+  if (traktStarting || traktDevice.value) return;
+  traktStarting = true;
+  traktError.value = '';
+  try {
+    const device = await traktHelper.requestDeviceCode();
+    traktDevice.value = device;
+    traktDeadline = Date.now() + Math.min(device.expires_in, TRAKT_CODE_WINDOW_SECONDS) * 1000;
+    startTraktCountdown();
+    scheduleTraktPoll(device.interval * 1000);
+  } catch (e) {
+    traktError.value = e.message || String(e);
+  } finally {
+    traktStarting = false;
+  }
+}
+
+function cancelTraktAuth() {
+  endTraktAuth();
+}
+
+onUnmounted(stopTraktTimers);
+
 function deauth(ListProvider) {
   new ListProvider()
     .deauth()
     .then(() => {
+      traktAuthenticated.value = !!api.settings.get('traktToken');
       syncRequest.execute();
     })
     .catch(() => {
@@ -510,6 +670,26 @@ updateBackgroundSyncState();
       color: var(--cl-secondary);
     }
   }
+}
+
+.trakt-auth-hint {
+  font-size: @small-text;
+  opacity: 0.8;
+  max-width: 220px;
+}
+
+.trakt-user-code {
+  font-family: monospace;
+  font-size: 20px;
+  font-weight: bold;
+  letter-spacing: 3px;
+  user-select: text;
+}
+
+.trakt-auth-error {
+  color: var(--cl-secondary);
+  font-size: @small-text;
+  word-break: break-word;
 }
 
 .listDiff {

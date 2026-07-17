@@ -199,7 +199,7 @@ export function xhrAction(
           !utils.rateLimitExclude.test(response.url) &&
           new Date().getTime() - retry.date.getTime() < limits.cutoff
         ) {
-          con.error('RATE LIMIT');
+          con.error('RATE LIMIT', response.url);
           setTimeout(() => {
             retry.try++;
             xhrAction(message, sender, sendResponse, environment, retry);

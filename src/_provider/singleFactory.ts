@@ -9,6 +9,7 @@ import { Single as KitsuSingle } from './Kitsu/single';
 import { Single as MangaBakaSingle } from './MangaBaka/single';
 import { Single as SimklSingle } from './Simkl/single';
 import { Single as ShikiSingle } from './Shikimori/single';
+import { Single as TraktSingle } from './Trakt/single';
 import { Single as LocalSingle } from './Local/single';
 
 export function getSingle(url: string) {
@@ -42,6 +43,9 @@ export function getSingle(url: string) {
   }
   if (syncMode === 'SHIKI') {
     return new ShikiSingle(url);
+  }
+  if (syncMode === 'TRAKT') {
+    return new TraktSingle(url);
   }
   throw 'Unknown sync mode';
 }
