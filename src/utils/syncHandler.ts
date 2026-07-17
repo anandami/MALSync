@@ -131,6 +131,16 @@ export function changeCheck(item, mode) {
           } else if (targetEp > 0) {
             projected = status.Watching;
           }
+          if (
+            projected === status.Completed &&
+            normalizeStatus(slave.status) === status.Watching &&
+            slave.watchedEp >= item.master.watchedEp
+          ) {
+            // The Trakt row covers the whole franchise; this entry's own
+            // episodes are all watched, the show only reads "watching"
+            // because other seasons exist. Nothing left to write.
+            projected = status.Watching;
+          }
           if (normalizeStatus(slave.status) !== projected) {
             item.diff = true;
             slave.diff.status = masterStatus;
