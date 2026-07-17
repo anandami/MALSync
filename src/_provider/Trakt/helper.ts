@@ -219,7 +219,12 @@ async function simklIdByTmdb(tmdbId: number, kind: 'tv' | 'movie' = 'tv'): Promi
       headers: SIMKL_HEADERS,
     }),
   );
-  if (response.status !== 200) return null;
+  // A failed request (rate limit, outage) is NOT the same as "no result":
+  // callers cache negative answers, and caching a transient failure as
+  // "not an anime" poisons the mapping for days.
+  if (response.status !== 200) {
+    throw new ServerOfflineError(`Simkl tmdb lookup failed: ${response.status}`);
+  }
   const data = parseJson(response.responseText);
   const simklId = Array.isArray(data) && data[0] && data[0].ids ? data[0].ids.simkl : null;
   return simklId ? Number(simklId) : null;
@@ -232,7 +237,10 @@ async function simklAnimeXref(simklId: number): Promise<SimklAnimeXref | null> {
       headers: SIMKL_HEADERS,
     }),
   );
-  if (response.status !== 200) return null;
+  if (response.status === 404) return null;
+  if (response.status !== 200) {
+    throw new ServerOfflineError(`Simkl anime lookup failed: ${response.status}`);
+  }
   const data = parseJson(response.responseText);
   if (!data || !data.ids) return null;
 
@@ -379,9 +387,11 @@ export async function tmdbToMal(
 ): Promise<number | null> {
   // Cache misses too ("this Trakt entry is not an anime"): most of a Trakt
   // library is regular TV/movies, and without negative caching every list
-  // refresh re-asks Simkl about all of them again.
+  // refresh re-asks Simkl about all of them again. Only DEFINITIVE answers
+  // reach this cache - the lookups throw on transient failures (v2 bump
+  // discards entries poisoned by rate limits before that distinction).
   const cacheObj = new Cache<number | null>(
-    `trakt/tmdbToMal/${kind}/${tmdbId}`,
+    `trakt/tmdbToMal/v2/${kind}/${tmdbId}`,
     7 * 24 * 60 * 60 * 1000,
   );
   if (await cacheObj.hasValue()) return cacheObj.getValue();
