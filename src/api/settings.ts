@@ -168,7 +168,9 @@ export const settingsObj = {
           clearTimeout(rateDebounce);
           if (changes.rateLimit.newValue) {
             con.log('Rate limited');
-            if (!$('.type-rate').length) {
+            // jQuery only exists on content-script pages; the minimal app
+            // (popup/pwa/install) has its own UI and no `$`.
+            if (typeof $ !== 'undefined' && !$('.type-rate').length) {
               utils.flashm('Rate limited. Retrying in a moment', {
                 error: true,
                 type: 'rate',
@@ -178,7 +180,7 @@ export const settingsObj = {
           } else {
             rateDebounce = setTimeout(() => {
               con.log('No Rate limited');
-              $('.type-rate').remove();
+              if (typeof $ !== 'undefined') $('.type-rate').remove();
             }, 5000);
           }
         } catch (e) {
