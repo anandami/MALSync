@@ -1143,6 +1143,36 @@
         "message": "List:",
         "description": "List Sync label the size of a list on a specific provider"
     },
+    "settings_listsync_trakt_connect": {
+        "message": "Connect Trakt",
+        "description": "List Sync button that starts Trakt's device authentication flow"
+    },
+    "settings_listsync_trakt_activate": {
+        "message": "Enter this code on trakt.tv/activate",
+        "description": "List Sync link label pointing the user to Trakt's device activation page"
+    },
+    "settings_listsync_trakt_waiting": {
+        "message": "Waiting for approval… this completes automatically.",
+        "description": "List Sync status text shown while polling Trakt for device-flow approval"
+    },
+    "settings_listsync_trakt_expires": {
+        "message": "Code expires in $time$",
+        "description": "List Sync countdown showing how long the Trakt device code stays valid",
+        "placeholders": {
+            "time": {
+                "content": "$1",
+                "example": "9:32"
+            }
+        }
+    },
+    "settings_listsync_trakt_expired": {
+        "message": "This code is no longer valid on Trakt. Click \"Connect Trakt\" to get a fresh code and enter it right away.",
+        "description": "List Sync error shown when the Trakt device code expired or was rejected by Trakt"
+    },
+    "settings_listsync_trakt_denied": {
+        "message": "Access was denied on trakt.tv. Click \"Connect Trakt\" to try again.",
+        "description": "List Sync error shown when the user denied the authorization request on Trakt"
+    },
     "settings_listsync_itemcount": {
         "message": "Items to sync:",
         "description": "List Sync label to show the total number of items that need to be synced"

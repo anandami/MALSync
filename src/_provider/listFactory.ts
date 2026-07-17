@@ -7,6 +7,7 @@ import { UserList as KitsuList } from './Kitsu/list';
 import { UserList as MangaBakaList } from './MangaBaka/list';
 import { UserList as SimklList } from './Simkl/list';
 import { UserList as ShikiList } from './Shikimori/list';
+import { UserList as TraktList } from './Trakt/list';
 import { UserList as LocalList } from './Local/list';
 
 export async function getList(...args) {
@@ -27,7 +28,7 @@ export function getOnlyList(...args) {
   return getListObj(args);
 }
 
-export function getListbyType(syncMode: string, args = []) {
+export function getListbyType(syncMode: string, args: any[] = []) {
   return getListObj(args, syncMode);
 }
 
@@ -58,6 +59,9 @@ function getListObj(args, syncMode = '') {
   }
   if (syncMode === 'SHIKI') {
     return new ShikiList(status, listType, sorting);
+  }
+  if (syncMode === 'TRAKT') {
+    return new TraktList(status, listType, sorting);
   }
   throw 'Unknown sync mode';
 }

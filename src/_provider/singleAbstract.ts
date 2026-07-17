@@ -53,6 +53,19 @@ export abstract class SingleAbstract {
     },
     simkl: NaN,
     baka: NaN,
+    trakt: {
+      id: NaN,
+      slug: '',
+      // Trakt/TVDB season number(s) this specific MAL entry maps to - a MAL
+      // entry is one season of a franchise, Trakt models the whole franchise
+      // as one show split into seasons, so this is required to know which
+      // season's progress belongs to this entry.
+      seasons: [] as number[],
+      // Trakt keeps movies in a separate id/url namespace from shows (their
+      // numeric ids can even collide), so "which namespace" must travel with
+      // the id.
+      isMovie: false,
+    },
   };
 
   protected options: {
@@ -381,6 +394,16 @@ export abstract class SingleAbstract {
         name: 'Simkl',
         icon: 'https://eu.simkl.in/img_favicon/v2/favicon-32x32.png',
         link: `https://simkl.com/${this.type}/${this.ids.simkl}`,
+      });
+    }
+
+    if (this.ids.trakt.id && name !== 'Trakt') {
+      res.push({
+        name: 'Trakt',
+        icon: 'https://trakt.tv/favicon.ico',
+        link: `https://trakt.tv/${this.ids.trakt.isMovie ? 'movies' : 'shows'}/${
+          this.ids.trakt.slug || this.ids.trakt.id
+        }`,
       });
     }
 
@@ -886,6 +909,8 @@ export abstract class SingleAbstract {
     if (this.ids.kitsu.id && allowed.includes('KITSU')) return `kitsu:${this.ids.kitsu.id}`;
     if (this.ids.simkl && allowed.includes('SIMKL')) return `simkl:${this.ids.simkl}`;
     if (this.ids.baka && allowed.includes('MANGABAKA')) return `mangabaka:${this.ids.baka}`;
+    if (this.ids.trakt.id && allowed.includes('TRAKT'))
+      return `trakt:${this.ids.trakt.isMovie ? 'm' : ''}${this.ids.trakt.id}`;
     return this.ids.mal;
   }
 
