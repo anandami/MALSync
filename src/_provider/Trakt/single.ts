@@ -290,10 +290,24 @@ export class Single extends SingleAbstract {
         () => null,
       );
 
-      const mappedSeasons: any[] =
+      let mappedSeasons: any[] =
         progress && Array.isArray(progress.seasons)
           ? progress.seasons.filter((s: any) => this.ids.trakt.seasons.includes(Number(s.number)))
           : [];
+
+      // Simkl sometimes reports franchise-level season numbers while the id
+      // resolution lands on a standalone show (e.g. Steins;Gate 0: "season 2"
+      // of the franchise, but its own single-season show on Trakt) - writes
+      // would then target a season that doesn't exist and silently no-op.
+      // When nothing matches and the show only has one real season, trust the
+      // show over the mapping; ambiguous multi-season shows stay untouched.
+      if (!mappedSeasons.length && progress && Array.isArray(progress.seasons)) {
+        const realSeasons = progress.seasons.filter((s: any) => Number(s.number) > 0);
+        if (realSeasons.length === 1) {
+          this.ids.trakt.seasons = [Number(realSeasons[0].number)];
+          mappedSeasons = realSeasons;
+        }
+      }
 
       if (mappedSeasons.length) {
         completedEpisodes = mappedSeasons.reduce((sum, s) => sum + (Number(s.completed) || 0), 0);
