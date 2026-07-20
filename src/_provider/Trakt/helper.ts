@@ -199,49 +199,48 @@ interface SimklAnimeXref {
   seasons: number[];
 }
 
+// A failed request (rate limit, outage) is NOT the same as "no result":
+// callers cache negative answers, and caching a transient failure as "not an
+// anime" poisons the mapping for days. Retrying here (rather than letting a
+// single 429 kill the whole item for the entire sync run) matters a lot
+// during a full cache rebuild, when hundreds of lookups fire in one run and
+// Simkl's rate limit is easy to graze even with the throttled spacing.
+const SIMKL_MAX_RETRIES = 4;
+
+async function simklFetch(url: string): Promise<any> {
+  for (let attempt = 0; ; attempt++) {
+    // eslint-disable-next-line no-await-in-loop
+    const response = await throttledSimkl(() =>
+      api.request.xhr('GET', { url, headers: SIMKL_HEADERS }),
+    );
+    if (response.status === 200) return parseJson(response.responseText);
+    if (response.status === 404) return null;
+    if (
+      (response.status === 429 || response.status === 0 || response.status >= 500) &&
+      attempt < SIMKL_MAX_RETRIES
+    ) {
+      // eslint-disable-next-line no-await-in-loop
+      await utils.wait(1500 * (attempt + 1));
+      continue;
+    }
+    throw new ServerOfflineError(`Simkl request failed: ${response.status} (${url})`);
+  }
+}
+
 async function simklIdByMal(malId: number): Promise<number | null> {
-  const response = await throttledSimkl(() =>
-    api.request.xhr('GET', {
-      url: `https://api.simkl.com/search/id?mal=${malId}`,
-      headers: SIMKL_HEADERS,
-    }),
-  );
-  if (response.status !== 200) return null;
-  const data = parseJson(response.responseText);
+  const data = await simklFetch(`https://api.simkl.com/search/id?mal=${malId}`);
   const simklId = Array.isArray(data) && data[0] && data[0].ids ? data[0].ids.simkl : null;
   return simklId ? Number(simklId) : null;
 }
 
 async function simklIdByTmdb(tmdbId: number, kind: 'tv' | 'movie' = 'tv'): Promise<number | null> {
-  const response = await throttledSimkl(() =>
-    api.request.xhr('GET', {
-      url: `https://api.simkl.com/search/id?tmdb=${tmdbId}&type=${kind}`,
-      headers: SIMKL_HEADERS,
-    }),
-  );
-  // A failed request (rate limit, outage) is NOT the same as "no result":
-  // callers cache negative answers, and caching a transient failure as
-  // "not an anime" poisons the mapping for days.
-  if (response.status !== 200) {
-    throw new ServerOfflineError(`Simkl tmdb lookup failed: ${response.status}`);
-  }
-  const data = parseJson(response.responseText);
+  const data = await simklFetch(`https://api.simkl.com/search/id?tmdb=${tmdbId}&type=${kind}`);
   const simklId = Array.isArray(data) && data[0] && data[0].ids ? data[0].ids.simkl : null;
   return simklId ? Number(simklId) : null;
 }
 
 async function simklAnimeXref(simklId: number): Promise<SimklAnimeXref | null> {
-  const response = await throttledSimkl(() =>
-    api.request.xhr('GET', {
-      url: `https://api.simkl.com/anime/${simklId}?extended=full`,
-      headers: SIMKL_HEADERS,
-    }),
-  );
-  if (response.status === 404) return null;
-  if (response.status !== 200) {
-    throw new ServerOfflineError(`Simkl anime lookup failed: ${response.status}`);
-  }
-  const data = parseJson(response.responseText);
+  const data = await simklFetch(`https://api.simkl.com/anime/${simklId}?extended=full`);
   if (!data || !data.ids) return null;
 
   const seasons =
