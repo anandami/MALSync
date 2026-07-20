@@ -259,22 +259,56 @@ async function simklAnimeXref(simklId: number): Promise<SimklAnimeXref | null> {
   };
 }
 
+// Public (unauthenticated) GET against api.trakt.tv, with the same
+// retry-with-backoff treatment as the Simkl lookups: these calls sit at the
+// tail end of the mapping chain (last hop before a Trakt show/movie id is
+// known), and without retries a single transient hiccup here silently sank
+// an otherwise-correct mapping for well-known titles - the item then shows
+// up as "missing" with nothing pointing at why.
+const TRAKT_GET_MAX_RETRIES = 3;
+
+export async function traktPublicGet(url: string): Promise<{ status: number; body: any }> {
+  const headers = {
+    'Content-Type': 'application/json',
+    'trakt-api-version': '2',
+    'trakt-api-key': clientId,
+  };
+  for (let attempt = 0; ; attempt++) {
+    let response;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      response = await api.request.xhr('GET', { url, headers });
+    } catch (e) {
+      if (attempt < TRAKT_GET_MAX_RETRIES) {
+        // eslint-disable-next-line no-await-in-loop
+        await utils.wait(1500 * (attempt + 1));
+        continue;
+      }
+      throw new ServerOfflineError(`Trakt request failed: network error (${url})`);
+    }
+    if (response.status === 200) {
+      return { status: 200, body: parseJson(response.responseText) };
+    }
+    if (response.status === 404) return { status: 404, body: null };
+    if (
+      (response.status === 429 || response.status === 0 || response.status >= 500) &&
+      attempt < TRAKT_GET_MAX_RETRIES
+    ) {
+      // eslint-disable-next-line no-await-in-loop
+      await utils.wait(1500 * (attempt + 1));
+      continue;
+    }
+    return { status: response.status, body: null };
+  }
+}
+
 async function tmdbToTrakt(tmdbId: number): Promise<{ traktId: number; slug: string } | null> {
   const cacheObj = new Cache(`trakt/tmdbToTrakt/${tmdbId}`, 30 * 24 * 60 * 60 * 1000);
   if (await cacheObj.hasValue()) return cacheObj.getValue();
 
-  const response = await api.request.xhr('GET', {
-    url: `${apiBase}/search/tmdb/${tmdbId}?type=show`,
-    headers: {
-      'Content-Type': 'application/json',
-      'trakt-api-version': '2',
-      'trakt-api-key': clientId,
-    },
-  });
+  const { status, body: data } = await traktPublicGet(`${apiBase}/search/tmdb/${tmdbId}?type=show`);
 
-  if (response.status !== 200) return null;
-  const data = parseJson(response.responseText);
-  if (!Array.isArray(data) || !data.length) return null;
+  if (status !== 200 || !Array.isArray(data) || !data.length) return null;
 
   const show = data[0] && data[0].show ? data[0].show : null;
   if (!show || !show.ids || !show.ids.trakt) return null;
@@ -295,22 +329,10 @@ async function tmdbToTrakt(tmdbId: number): Promise<{ traktId: number; slug: str
 async function traktMovieFromXref(
   xref: SimklAnimeXref,
 ): Promise<{ traktId: number; slug: string } | null> {
-  const headers = {
-    'Content-Type': 'application/json',
-    'trakt-api-version': '2',
-    'trakt-api-key': clientId,
-  };
-
   if (xref.traktMovieSlug) {
-    const response = await api.request.xhr('GET', {
-      url: `${apiBase}/movies/${xref.traktMovieSlug}`,
-      headers,
-    });
-    if (response.status === 200) {
-      const data = parseJson(response.responseText);
-      if (data && data.ids && data.ids.trakt) {
-        return { traktId: Number(data.ids.trakt), slug: String(data.ids.slug) };
-      }
+    const { status, body: data } = await traktPublicGet(`${apiBase}/movies/${xref.traktMovieSlug}`);
+    if (status === 200 && data && data.ids && data.ids.trakt) {
+      return { traktId: Number(data.ids.trakt), slug: String(data.ids.slug) };
     }
   }
 
@@ -320,10 +342,8 @@ async function traktMovieFromXref(
 
   for (let u = 0; u < searchUrls.length; u++) {
     // eslint-disable-next-line no-await-in-loop
-    const response = await api.request.xhr('GET', { url: searchUrls[u], headers });
-    if (response.status !== 200) continue;
-    const data = parseJson(response.responseText);
-    if (!Array.isArray(data)) continue;
+    const { status, body: data } = await traktPublicGet(searchUrls[u]);
+    if (status !== 200 || !Array.isArray(data)) continue;
 
     for (let i = 0; i < data.length; i++) {
       const entry = data[i];
@@ -414,17 +434,11 @@ export async function traktSlugToMal(
   const cacheObj = new Cache(`trakt/slugToMal/${kind}/${slug}`, 30 * 24 * 60 * 60 * 1000);
   if (await cacheObj.hasValue()) return cacheObj.getValue();
 
-  const showResponse = await api.request.xhr('GET', {
-    url: `${apiBase}/${kind === 'movie' ? 'movies' : 'shows'}/${slug}?extended=full`,
-    headers: {
-      'Content-Type': 'application/json',
-      'trakt-api-version': '2',
-      'trakt-api-key': clientId,
-    },
-  });
+  const { status, body: show } = await traktPublicGet(
+    `${apiBase}/${kind === 'movie' ? 'movies' : 'shows'}/${slug}?extended=full`,
+  );
 
-  if (showResponse.status !== 200) return null;
-  const show = parseJson(showResponse.responseText);
+  if (status !== 200) return null;
   const tmdbId = show && show.ids && show.ids.tmdb ? Number(show.ids.tmdb) : null;
   if (!tmdbId) return null;
 
