@@ -252,21 +252,13 @@ export class Single extends SingleAbstract {
 
     // If we still don't have a Trakt ID and have a slug, try to fetch it
     if (Number.isNaN(this.ids.trakt.id) && this.ids.trakt.slug) {
-      const showResponse = await api.request.xhr('GET', {
-        url: `https://api.trakt.tv/${this.ids.trakt.isMovie ? 'movies' : 'shows'}/${
+      const { status, body: showData } = await helper.traktPublicGet(
+        `https://api.trakt.tv/${this.ids.trakt.isMovie ? 'movies' : 'shows'}/${
           this.ids.trakt.slug
         }?extended=full`,
-        headers: {
-          'Content-Type': 'application/json',
-          'trakt-api-version': '2',
-          'trakt-api-key': helper.clientId,
-        },
-      });
-      if (showResponse.status === 200) {
-        const showData = JSON.parse(showResponse.responseText);
-        if (showData && showData.ids && showData.ids.trakt) {
-          this.ids.trakt.id = Number(showData.ids.trakt);
-        }
+      );
+      if (status === 200 && showData && showData.ids && showData.ids.trakt) {
+        this.ids.trakt.id = Number(showData.ids.trakt);
       }
     }
 
