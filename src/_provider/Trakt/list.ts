@@ -38,7 +38,12 @@ export class UserList extends ListAbstract {
     con.log('[UserList][Trakt]', `status: ${this.status}`);
     if (this.listType === 'manga') throw new Error('Trakt does not support manga');
 
-    return this.syncList().then(async (list: Record<number, helper.TraktCachedShow>) => {
+    // forceFresh: this is the one call that seeds cacheList for the whole
+    // bulk-sync session - every per-item lookup afterwards is lazy and reuses
+    // whatever this returns, so a stale snapshot here (e.g. after the user
+    // cleared their Trakt history outside the extension - see the note on
+    // syncList) would poison the entire run, not just this one list.
+    return this.syncList(false, true).then(async (list: Record<number, helper.TraktCachedShow>) => {
       this.done = true;
       const data = await this.prepareData(Object.values(list), this.status);
       con.log(data);
