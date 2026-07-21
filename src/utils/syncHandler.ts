@@ -6,6 +6,7 @@ import { Single as ShikiSingle } from '../_provider/Shikimori/single';
 import { Single as BakaSingle } from '../_provider/MangaBaka/single';
 import { Single as TraktSingle } from '../_provider/Trakt/single';
 import { UserList as TraktList } from '../_provider/Trakt/list';
+import { malToTrakt } from '../_provider/Trakt/helper';
 
 import { UserList as MalList } from '../_provider/MyAnimeList_hybrid/list';
 import { UserList as AnilistList } from '../_provider/AniList/list';
@@ -17,7 +18,7 @@ import { getSyncMode } from '../_provider/helper';
 import { listElement } from '../_provider/listAbstract';
 import { status } from '../_provider/definitions';
 
-export function generateSync(
+export async function generateSync(
   masterList: object,
   slaveLists: object[],
   mode,
@@ -35,6 +36,136 @@ export function generateSync(
     changeCheck(list[i], mode);
     missingCheck(list[i], missing, typeArray, mode);
   }
+
+  await consolidateTraktMultiSeasonFranchises(list, missing, typeArray);
+  await filterFalseTraktMissing(missing);
+}
+
+// Simkl's per-MAL-entry season mapping isn't reliable enough for franchises
+// split across multiple MAL entries (one per season) to each write to their
+// own Trakt season independently - confirmed in production: two MAL entries
+// of the same franchise both resolving to "season 1" and repeatedly undoing
+// each other's history/rating writes. Rather than trust that mapping at all
+// for these, collapse every MAL entry that resolves to the same Trakt show
+// into a single write: sum their watched-episode counts and let
+// Trakt/single.ts (in "consolidate" mode) spread that flat total across
+// every real season Trakt reports, skipping status and rating entirely so
+// this can never re-introduce the same fight over those fields.
+async function consolidateTraktMultiSeasonFranchises(
+  list: any,
+  missing: any[],
+  typeArray: any[],
+): Promise<void> {
+  if (!typeArray.includes('TRAKT')) return;
+
+  const malIds = Object.keys(list)
+    .map(Number)
+    .filter(id => !Number.isNaN(id) && list[id].master && list[id].master.type === 'anime');
+
+  const groups = new Map<number, number[]>();
+  for (let i = 0; i < malIds.length; i++) {
+    const malId = malIds[i];
+    // eslint-disable-next-line no-await-in-loop
+    const info = await malToTrakt(malId, 'anime').catch(() => null);
+    if (!info || info.isMovie) continue;
+    if (!groups.has(info.traktId)) groups.set(info.traktId, []);
+    (groups.get(info.traktId) as number[]).push(malId);
+  }
+
+  const allGroups = Array.from(groups.values());
+  for (let g = 0; g < allGroups.length; g++) {
+    const groupIds = allGroups[g];
+    if (groupIds.length < 2) continue;
+
+    let combinedWatchedEp = 0;
+    for (let i = 0; i < groupIds.length; i++) {
+      const item = list[groupIds[i]];
+      combinedWatchedEp += item.master.watchedEp || 0;
+      item.slaves = item.slaves.filter((s: any) => getType(s.url) !== 'TRAKT');
+      item.diff = item.slaves.some((s: any) => Object.keys(s.diff).length > 0);
+    }
+    for (let i = missing.length - 1; i >= 0; i--) {
+      if (missing[i].syncType === 'TRAKT' && groupIds.includes(missing[i].malId)) {
+        missing.splice(i, 1);
+      }
+    }
+
+    const carrierMalId = groupIds[0];
+    missing.push({
+      title: list[carrierMalId].master.title,
+      type: 'anime',
+      syncType: 'TRAKT',
+      malId: carrierMalId,
+      watchedEp: combinedWatchedEp,
+      url: `https://myanimelist.net/anime/${carrierMalId}`,
+      error: null,
+      traktConsolidated: true,
+    });
+  }
+}
+
+// The bulk Trakt list collapses an entire franchise into one row, resolved to
+// whichever season Simkl treats as canonical (see Trakt/list.ts) - a MAL
+// entry for any other season of that franchise never matches a slave in the
+// bulk comparison above and would sit in "missing" forever, even though
+// writing to it already works fine (Trakt/single.ts resolves the right
+// season on its own). Trakt's bulk endpoints have no per-season breakdown to
+// fix this in the mass fetch itself, so instead re-resolve just the
+// candidates that would show as missing - normally a handful, not the whole
+// list - one at a time via the same malToTrakt + /progress/watched lookup
+// single.ts already does, and drop the ones that are actually already in
+// sync.
+async function filterFalseTraktMissing(missing: any[]): Promise<void> {
+  const candidates = missing.filter(m => m.syncType === 'TRAKT');
+  for (let i = 0; i < candidates.length; i++) {
+    const miss = candidates[i];
+    // eslint-disable-next-line no-await-in-loop
+    const satisfied = await isTraktMissingSatisfied(miss).catch(() => false);
+    if (satisfied) {
+      const idx = missing.indexOf(miss);
+      if (idx !== -1) missing.splice(idx, 1);
+    }
+  }
+}
+
+async function isTraktMissingSatisfied(miss: any): Promise<boolean> {
+  const single = new TraktSingle(miss.url);
+  // Consolidated entries were resolved against the sum of every season in
+  // the franchise (see consolidateTraktMultiSeasonFranchises) - checking
+  // them here without the same flag compares that combined total against
+  // just one season, which can never match, so the item never leaves
+  // "missing" even once it's genuinely fully synced.
+  if (miss.traktConsolidated) (single as any).setConsolidateSeasons();
+  await single.update();
+  if (!single.isOnList()) return false;
+
+  // Reuse changeCheck so "already synced" is judged by the exact same rules
+  // (including the Trakt status-projection block) as a normal diff check -
+  // just fed with this one entry's real, season-scoped state instead of the
+  // franchise-collapsed bulk row.
+  const item = {
+    diff: false,
+    master: {
+      uid: miss.malId,
+      type: miss.type,
+      score: miss.score,
+      watchedEp: miss.watchedEp,
+      status: miss.status,
+    },
+    slaves: [
+      {
+        url: single.getDisplayUrl(),
+        score: single.getScore(),
+        watchedEp: single.getEpisode(),
+        totalEp: single.getTotalEpisodes(),
+        status: single.getStatus(),
+        diff: {},
+      },
+    ],
+  } as any;
+
+  changeCheck(item, 'mirror');
+  return !item.diff;
 }
 
 export function getType(url) {
@@ -206,10 +337,14 @@ export function missingCheck(item, missing, types, mode) {
 
 // Sync
 
-export async function syncList(list, thisMissing) {
+// `shouldSync` lets a caller restrict a run to a subset of malIds (e.g. "just
+// these two titles, to verify before trusting the rest") without touching
+// list/thisMissing themselves - skipped entries keep their diff/missing
+// state exactly as-is, ready for a later full run.
+export async function syncList(list, thisMissing, shouldSync?: (malId: number) => boolean) {
   for (const i in list) {
     const el = list[i];
-    if (el.diff) {
+    if (el.diff && (!shouldSync || shouldSync(Number(i)))) {
       try {
         await syncListItem(el);
         el.diff = false;
@@ -222,6 +357,7 @@ export async function syncList(list, thisMissing) {
   const missing = thisMissing.slice();
   for (const i in missing) {
     const miss = missing[i];
+    if (shouldSync && !shouldSync(miss.malId)) continue;
     con.log('Sync missing', miss);
     await syncMissing(miss)
       .then(() => {
@@ -243,15 +379,17 @@ export async function syncListItem(item) {
 }
 
 export async function syncMissing(item) {
-  item.diff = {
-    score: item.score,
-    watchedEp: item.watchedEp,
-    status: normalizeStatus(item.status),
-    startDate: item.startDate,
-    finishDate: item.finishDate,
-    rewatchCount: item.rewatchCount,
-  };
-  if (item.type === 'manga') {
+  // Built conditionally (rather than always including every field) so a
+  // consolidated Trakt franchise entry - which only ever sets watchedEp -
+  // can leave score/status/dates untouched instead of blanking them.
+  item.diff = {};
+  if (item.score !== undefined) item.diff.score = item.score;
+  if (item.watchedEp !== undefined) item.diff.watchedEp = item.watchedEp;
+  if (item.status !== undefined) item.diff.status = normalizeStatus(item.status);
+  if (item.startDate !== undefined) item.diff.startDate = item.startDate;
+  if (item.finishDate !== undefined) item.diff.finishDate = item.finishDate;
+  if (item.rewatchCount !== undefined) item.diff.rewatchCount = item.rewatchCount;
+  if (item.type === 'manga' && item.readVol !== undefined) {
     item.diff.readVol = item.readVol;
   }
   return syncItem(item, item.syncType);
@@ -275,6 +413,7 @@ export function syncItem(slave, pageType) {
       singleClass = new BakaSingle(slave.url);
     } else if (pageType === 'TRAKT') {
       singleClass = new TraktSingle(slave.url);
+      if (slave.traktConsolidated) singleClass.setConsolidateSeasons();
     } else {
       throw 'No sync type';
     }
@@ -503,7 +642,7 @@ export const background = {
 
       const listOptions: any = await retriveLists(providerList, type, getList);
 
-      generateSync(
+      await generateSync(
         listOptions.master,
         listOptions.slaves,
         mode,
