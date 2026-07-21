@@ -303,7 +303,13 @@ export async function traktPublicGet(url: string): Promise<{ status: number; bod
 }
 
 async function tmdbToTrakt(tmdbId: number): Promise<{ traktId: number; slug: string } | null> {
-  const cacheObj = new Cache(`trakt/tmdbToTrakt/${tmdbId}`, 30 * 24 * 60 * 60 * 1000);
+  // v2: a batch of these ended up caching the wrong show for 30 days (traced
+  // live to a real case - a MAL entry resolving to a completely unrelated
+  // Trakt show). tmdbToMal already got this same namespace bump for the same
+  // reason (bug #2); this cache and the two below it never did. Bumping
+  // forces every entry to re-resolve from scratch instead of trusting
+  // whatever is already sitting in storage.
+  const cacheObj = new Cache(`trakt/tmdbToTrakt/v2/${tmdbId}`, 30 * 24 * 60 * 60 * 1000);
   if (await cacheObj.hasValue()) return cacheObj.getValue();
 
   const { status, body: data } = await traktPublicGet(`${apiBase}/search/tmdb/${tmdbId}?type=show`);
@@ -372,7 +378,9 @@ export async function malToTrakt(
 ): Promise<TraktIdMapping | null> {
   if (type === 'manga') return null;
 
-  const cacheObj = new Cache(`trakt/malToTrakt/${malId}`, 30 * 24 * 60 * 60 * 1000);
+  // v2: see the matching note on tmdbToTrakt above - same poisoning risk,
+  // same fix.
+  const cacheObj = new Cache(`trakt/malToTrakt/v2/${malId}`, 30 * 24 * 60 * 60 * 1000);
   if (await cacheObj.hasValue()) return cacheObj.getValue();
 
   const simklId = await simklIdByMal(malId);
@@ -431,7 +439,9 @@ export async function traktSlugToMal(
   slug: string,
   kind: 'show' | 'movie' = 'show',
 ): Promise<number | null> {
-  const cacheObj = new Cache(`trakt/slugToMal/${kind}/${slug}`, 30 * 24 * 60 * 60 * 1000);
+  // v2: see the matching note on tmdbToTrakt above - same poisoning risk,
+  // same fix.
+  const cacheObj = new Cache(`trakt/slugToMal/v2/${kind}/${slug}`, 30 * 24 * 60 * 60 * 1000);
   if (await cacheObj.hasValue()) return cacheObj.getValue();
 
   const { status, body: show } = await traktPublicGet(
@@ -689,13 +699,25 @@ export function listKey(traktId: number, isMovie: boolean): number {
 
 let cacheList: Record<number, TraktCachedShow> | undefined;
 
-export async function syncList(lazy = false): Promise<Record<number, TraktCachedShow>> {
+// `last_activities` only bumps its timestamps on additions (watched_at,
+// rated_at, ...) - Trakt has no field that reflects a user clearing/removing
+// history from their own site, so that comparison alone can never notice a
+// manual wipe done outside the extension. Confirmed live: after fully
+// clearing a Trakt account's history, the extension kept reporting "Trakt
+// list up to date" and replayed a 120-item stale snapshot. `forceFresh`
+// skips the shortcut entirely; the bulk list-sync page's own initial fetch
+// uses it so the one snapshot every downstream lazy per-item call in that
+// session builds on is never more than one real fetch old.
+export async function syncList(
+  lazy = false,
+  forceFresh = false,
+): Promise<Record<number, TraktCachedShow>> {
   const logger = con.m('Trakt', '#ed1c24').m('list');
 
   if (typeof cacheList === 'undefined') {
     const stored = await api.storage.get('traktList');
     cacheList = stored || {};
-  } else if (lazy) {
+  } else if (lazy && !forceFresh) {
     return cacheList;
   }
 
@@ -715,7 +737,7 @@ export async function syncList(lazy = false): Promise<Record<number, TraktCached
       : '';
   const newTimestamp = episodeStamp || movieStamp ? `${episodeStamp}|${movieStamp}` : null;
 
-  if (lastCheck && newTimestamp && lastCheck === newTimestamp && cacheList) {
+  if (!forceFresh && lastCheck && newTimestamp && lastCheck === newTimestamp && cacheList) {
     logger.log('Trakt list up to date');
     return cacheList;
   }
