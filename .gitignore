@@ -50,3 +50,7 @@ src/chibiScript/ChibiGeneratorTypes.ts
 
 # IDE
 .idea
+
+# trakt-validation script output - contains a real user's watch data
+scripts/trakt-validation/report.json
+scripts/trakt-validation/audit-report.html
