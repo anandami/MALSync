@@ -119,11 +119,19 @@
         <FormButton
           v-if="!syncRequest.loading && syncRequest.data"
           color="primary"
-          :disabled="syncing"
+          :disabled="syncing || itemNumber === 0"
           @click="!syncing ? startSync() : ''"
         >
           {{ lang('settings_listsync_syncbutton') }}
         </FormButton>
+        <div v-if="!syncRequest.loading && syncRequest.data && !syncing" class="selection-controls">
+          <FormButton :animation="false" color="secondary" padding="mini" @click="selectAll()">
+            Selecionar todos
+          </FormButton>
+          <FormButton :animation="false" color="secondary" padding="mini" @click="selectNone()">
+            Desmarcar todos
+          </FormButton>
+        </div>
       </Card>
     </Section>
 
@@ -132,8 +140,12 @@
       <Description :height="500">
         <Section v-for="(item, index) in listDiff" :key="index" spacer="half">
           <Card class="listDiff">
-            <Header spacer="half">
-              {{ item.master.title }}
+            <Header spacer="half" class="listDiff-header">
+              <span class="title-text">{{ item.master.title }}</span>
+              <FormCheckbox
+                :model-value="isSelected(Number(index))"
+                @update:model-value="value => setSelected(Number(index), value)"
+              />
             </Header>
             <div class="listDiff-inner">
               <FormButton :animation="false">
@@ -279,8 +291,12 @@
             spacer="half"
           >
             <Card class="missing">
-              <Header spacer="half">
-                {{ missing_title[0].title }}
+              <Header spacer="half" class="listDiff-header">
+                <span class="title-text">{{ missing_title[0].title }}</span>
+                <FormCheckbox
+                  :model-value="isSelected(missing_title[0].malId)"
+                  @update:model-value="value => setSelected(missing_title[0].malId, value)"
+                />
               </Header>
               <div class="missing-item">
                 <FormButton :animation="false">
@@ -339,7 +355,7 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, onUnmounted, reactive, ref } from 'vue';
+import { computed, onUnmounted, reactive, ref, watch } from 'vue';
 import * as sync from '../../../utils/syncHandler';
 import { getStatusText } from '../../../utils/general';
 import { createRequest } from '../../utils/reactive';
@@ -431,7 +447,7 @@ const syncRequest = createRequest(parameters, async params => {
   const list = [] as any[];
   const missing = [] as any[];
 
-  sync.generateSync(
+  await sync.generateSync(
     listOptions.master as any,
     listOptions.slaves,
     mode,
@@ -450,6 +466,45 @@ const syncRequest = createRequest(parameters, async params => {
     missingGroupBy,
   };
 });
+
+// Which malIds will actually be synced on the next click - defaults to
+// "everything" (matching the old always-sync-all behavior) whenever a fresh
+// list loads, but lets a cautious run be narrowed down to a handful of
+// titles first (e.g. to verify a fix before trusting it with the full list).
+const selectedMalIds = reactive(new Set<number>());
+
+watch(
+  () => syncRequest.data,
+  data => {
+    selectedMalIds.clear();
+    if (!data) return;
+    Object.keys(data.list).forEach(key => {
+      if (data.list[key].diff) selectedMalIds.add(Number(key));
+    });
+    data.missing.forEach((m: any) => selectedMalIds.add(m.malId));
+  },
+);
+
+function isSelected(malId: number) {
+  return selectedMalIds.has(malId);
+}
+
+function setSelected(malId: number, value: boolean) {
+  if (value) selectedMalIds.add(malId);
+  else selectedMalIds.delete(malId);
+}
+
+function selectAll() {
+  if (!syncRequest.data) return;
+  Object.keys(syncRequest.data.list).forEach(key => {
+    if (syncRequest.data!.list[key].diff) selectedMalIds.add(Number(key));
+  });
+  syncRequest.data.missing.forEach((m: any) => selectedMalIds.add(m.malId));
+}
+
+function selectNone() {
+  selectedMalIds.clear();
+}
 
 const listDiff = computed(() => {
   const res = {} as any;
@@ -472,7 +527,8 @@ const itemNumber = computed(() => {
     return 0;
   }
   return (
-    Object.keys(listDiff.value).length + syncRequest.data.missing.filter(el => !el.error).length
+    Object.keys(listDiff.value).filter(key => selectedMalIds.has(Number(key))).length +
+    syncRequest.data.missing.filter(el => !el.error && selectedMalIds.has(el.malId)).length
   );
 });
 
@@ -480,7 +536,9 @@ function startSync() {
   syncing.value = true;
   totalItems.value = itemNumber.value;
 
-  sync.syncList(syncRequest.data!.list, syncRequest.data!.missing);
+  sync.syncList(syncRequest.data!.list, syncRequest.data!.missing, (malId: number) =>
+    selectedMalIds.has(malId),
+  );
 }
 
 function isExtension() {
@@ -690,6 +748,32 @@ updateBackgroundSyncState();
   color: var(--cl-secondary);
   font-size: @small-text;
   word-break: break-word;
+}
+
+.listDiff-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+
+  .title-text {
+    flex: 1;
+    min-width: 0;
+  }
+
+  // FormCheckbox's root is a fixed 60x32px toggle - without this it gets
+  // squeezed by flexbox alongside long, wrapping titles, which visually
+  // splits the slider's thumb from its track (looks like two loose dots).
+  :deep(.checkbox) {
+    flex-shrink: 0;
+  }
+}
+
+.selection-controls {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-top: 5px;
 }
 
 .listDiff {
