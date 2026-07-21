@@ -31,6 +31,22 @@ export class Single extends SingleAbstract {
 
   private lastSyncedEp = 0;
 
+  // Multi-season franchises: Simkl's per-MAL-entry season mapping isn't
+  // reliable enough for several MAL entries of the same franchise to each
+  // independently target their own Trakt season (confirmed in production -
+  // entries fight over the same season and undo each other's writes). When
+  // set, _update()/_sync() stop trying to resolve *this* MAL entry's own
+  // season and instead treat the flat episode count as spanning every real
+  // season Trakt reports for the show, so the caller can hand in one summed
+  // total across all of the franchise's MAL entries and have it land
+  // correctly regardless of which season each episode actually belongs to.
+  private consolidateSeasons = false;
+
+  public setConsolidateSeasons(): Single {
+    this.consolidateSeasons = true;
+    return this;
+  }
+
   shortName = 'Trakt';
 
   authenticationUrl = helper.activateUrl;
@@ -284,7 +300,11 @@ export class Single extends SingleAbstract {
 
       let mappedSeasons: any[] =
         progress && Array.isArray(progress.seasons)
-          ? progress.seasons.filter((s: any) => this.ids.trakt.seasons.includes(Number(s.number)))
+          ? progress.seasons.filter((s: any) =>
+              this.consolidateSeasons
+                ? Number(s.number) > 0
+                : this.ids.trakt.seasons.includes(Number(s.number)),
+            )
           : [];
 
       // Simkl sometimes reports franchise-level season numbers while the id
@@ -293,7 +313,13 @@ export class Single extends SingleAbstract {
       // would then target a season that doesn't exist and silently no-op.
       // When nothing matches and the show only has one real season, trust the
       // show over the mapping; ambiguous multi-season shows stay untouched.
-      if (!mappedSeasons.length && progress && Array.isArray(progress.seasons)) {
+      // Not needed in consolidated mode - it already spans every real season.
+      if (
+        !this.consolidateSeasons &&
+        !mappedSeasons.length &&
+        progress &&
+        Array.isArray(progress.seasons)
+      ) {
         const realSeasons = progress.seasons.filter((s: any) => Number(s.number) > 0);
         if (realSeasons.length === 1) {
           this.ids.trakt.seasons = [Number(realSeasons[0].number)];
@@ -366,7 +392,7 @@ export class Single extends SingleAbstract {
     );
 
     // Movies and shows use different payload shapes on every /sync endpoint.
-    const isMovie = this.animeInfo.isMovie;
+    const { isMovie } = this.animeInfo;
     const media = isMovie ? 'movies' : 'shows';
 
     // ── Episode history ───────────────────────────────────────────────────────
