@@ -3,6 +3,7 @@ import { firebaseNotification } from '../utils/firebaseNotification';
 import { PlayerSingleton, shortcutListener } from '../utils/player';
 import { floatClick } from '../floatbutton/extension';
 import { pageInterface } from '../pages/pageInterface';
+import { initCrunchyrollHistoryHarvest } from '../pages-chibi/implementations/Crunchyroll/historyHarvest';
 
 let lastFocus;
 
@@ -19,6 +20,8 @@ global.doubleLoad = true;
 
 async function main() {
   if (api.settings.get('userscriptModeButton')) throw 'Userscript mode';
+
+  initCrunchyrollHistoryHarvest();
 
   let pageObject = typeof _PageChibi !== 'undefined' ? _PageChibi : _Page;
   if (typeof pageObject === 'function') {
