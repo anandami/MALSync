@@ -8,6 +8,7 @@ import { ConfObj } from '../../../_provider/definitions';
 import SettingsGeneral from './settings-general.vue';
 import SettingsLogin from './settings-login.vue';
 import SettingsLocalSyncExport from './settings-local-sync-export.vue';
+import SettingsCrunchyrollImport from './settings-crunchyroll-import.vue';
 import SettingsDisabledWebsites from './settings-disabled-websites.vue';
 import SettingsGroup from './settings-group.vue';
 import SettingsHr from './settings-hr.vue';
@@ -252,6 +253,12 @@ export const tracking: ConfObj[] = [
     title: () => api.storage.lang('settings_LocalSync_Label'),
     condition: () => api.settings.get('localSync'),
     component: SettingsLocalSyncExport,
+  },
+  {
+    key: 'crunchyrollImport',
+    title: () => 'Importar histórico Crunchyroll',
+    condition: () => api.type === 'webextension',
+    component: SettingsCrunchyrollImport,
   },
   {
     key: 'allSitesUi',
