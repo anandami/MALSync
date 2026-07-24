@@ -123,7 +123,9 @@
 
     <Card v-if="plan.unmatched.length">
       <Header spacer="half">
-        {{ lang('crunchyrollImport_UnmatchedHeader', [syncModeTitle, String(plan.unmatched.length)]) }}
+        {{
+          lang('crunchyrollImport_UnmatchedHeader', [syncModeTitle, String(plan.unmatched.length)])
+        }}
       </Header>
       <Section v-for="item in plan.unmatched" :key="item.seriesId" spacer="half">
         <div class="title-text">{{ item.seriesTitle }}</div>
@@ -154,7 +156,9 @@
   <Section v-if="result">
     <Card>
       <div>
-        {{ lang('crunchyrollImport_ResultSummary', [String(result.updated), String(result.created)]) }}
+        {{
+          lang('crunchyrollImport_ResultSummary', [String(result.updated), String(result.created)])
+        }}
       </div>
       <div v-if="result.errors.length">
         {{ lang('crunchyrollImport_ResultErrors', [String(result.errors.length)]) }}
