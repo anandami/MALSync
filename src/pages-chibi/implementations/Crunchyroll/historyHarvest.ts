@@ -193,6 +193,9 @@ async function waitForFirstItems(): Promise<void> {
 // genuinely scrollable, verified by nudging scrollTop and checking it moved. Trusting computed
 // `overflow-y` alone isn't reliable here - Crunchyroll's real scroll panel isn't always a styled
 // ancestor of the list, which would silently fall back to scrolling the whole page instead.
+// Every candidate is logged (not just the winner) so a run where none of them qualify - e.g. a
+// virtualized list driven by wheel/transform instead of native scrollTop - is diagnosable from the
+// console instead of just silently falling back to the page.
 function findScrollContainer(start: Element): Element {
   const candidates: HTMLElement[] = [];
   let el: Element | null = start;
@@ -203,16 +206,33 @@ function findScrollContainer(start: Element): Element {
   const fallback = (document.scrollingElement || document.documentElement) as HTMLElement;
   if (!candidates.includes(fallback)) candidates.push(fallback);
 
+  let found: Element | null = null;
   for (let i = 0; i < candidates.length; i++) {
     const c = candidates[i];
-    if (c.scrollHeight <= c.clientHeight + 4) continue;
-    const before = c.scrollTop;
-    c.scrollTop = before + 50;
-    const moved = c.scrollTop !== before;
-    c.scrollTop = before;
-    if (moved) return c;
+    const tallEnough = c.scrollHeight > c.clientHeight + 4;
+    let moved = false;
+    if (tallEnough) {
+      const before = c.scrollTop;
+      c.scrollTop = before + 50;
+      moved = c.scrollTop !== before;
+      c.scrollTop = before;
+    }
+    con.log(
+      '[Crunchyroll History] scroll candidate',
+      i,
+      `<${c.tagName.toLowerCase()} class="${c.className}">`,
+      '- scrollHeight:',
+      c.scrollHeight,
+      'clientHeight:',
+      c.clientHeight,
+      'tallEnough:',
+      tallEnough,
+      'moved:',
+      moved,
+    );
+    if (!found && tallEnough && moved) found = c;
   }
-  return fallback;
+  return found || fallback;
 }
 
 // Scrolls in small steps and waits between them because the virtualized list's lazy-loading can
@@ -220,8 +240,11 @@ function findScrollContainer(start: Element): Element {
 // ended, just that the next batch hasn't arrived yet. Only gives up after several consecutive
 // rounds with no growth or movement, each with extra time for a lazy-loaded batch to arrive.
 async function scrollCollecting(collect: () => void): Promise<boolean> {
-  const list =
-    document.querySelector('[role="list"]') || document.querySelector('[role="listitem"]');
+  // Anchored on an actual [role="listitem"] (already confirmed real by waitForFirstItems/collect)
+  // rather than the page's first [role="list"] - Crunchyroll's history page isn't necessarily the
+  // only place on the page using that role (e.g. a recommendations rail above it), and starting
+  // the ancestor walk from the wrong list silently searches the wrong part of the page entirely.
+  const list = document.querySelector('[role="listitem"]');
   const scrollContainer = findScrollContainer(list || document.body);
 
   con.log(
@@ -243,7 +266,15 @@ async function scrollCollecting(collect: () => void): Promise<boolean> {
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const heightBefore = scrollContainer.scrollHeight;
-    scrollContainer.scrollTop += Math.max(scrollContainer.clientHeight * 0.5, 300);
+    const step = Math.max(scrollContainer.clientHeight * 0.5, 300);
+    scrollContainer.scrollTop += step;
+    // Synthetic (untrusted) events never move native scroll themselves, but if the container
+    // findScrollContainer picked doesn't actually use native scrollTop - e.g. a virtualizer driven
+    // by its own wheel listener instead - this still gives its JS a chance to react, on top of the
+    // scrollTop nudge above.
+    scrollContainer.dispatchEvent(
+      new WheelEvent('wheel', { deltaY: step, bubbles: true, cancelable: true }),
+    );
     // eslint-disable-next-line no-await-in-loop
     await utils.wait(900);
     collect();
