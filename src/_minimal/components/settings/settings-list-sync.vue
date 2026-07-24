@@ -126,10 +126,10 @@
         </FormButton>
         <div v-if="!syncRequest.loading && syncRequest.data && !syncing" class="selection-controls">
           <FormButton :animation="false" color="secondary" padding="mini" @click="selectAll()">
-            Selecionar todos
+            {{ lang('settings_listsync_select_all') }}
           </FormButton>
           <FormButton :animation="false" color="secondary" padding="mini" @click="selectNone()">
-            Desmarcar todos
+            {{ lang('settings_listsync_select_none') }}
           </FormButton>
         </div>
       </Card>

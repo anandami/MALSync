@@ -33,13 +33,13 @@ export class Single extends SingleAbstract {
 
   // Multi-season franchises: Simkl's per-MAL-entry season mapping isn't
   // reliable enough for several MAL entries of the same franchise to each
-  // independently target their own Trakt season (confirmed in production -
-  // entries fight over the same season and undo each other's writes). When
-  // set, _update()/_sync() stop trying to resolve *this* MAL entry's own
-  // season and instead treat the flat episode count as spanning every real
-  // season Trakt reports for the show, so the caller can hand in one summed
-  // total across all of the franchise's MAL entries and have it land
-  // correctly regardless of which season each episode actually belongs to.
+  // independently target their own Trakt season - entries can fight over the
+  // same season and undo each other's writes. When set, _update()/_sync()
+  // stop trying to resolve *this* MAL entry's own season and instead treat
+  // the flat episode count as spanning every real season Trakt reports for
+  // the show, so the caller can hand in one summed total across all of the
+  // franchise's MAL entries and have it land correctly regardless of which
+  // season each episode actually belongs to.
   private consolidateSeasons = false;
 
   public setConsolidateSeasons(): Single {
@@ -327,15 +327,18 @@ export class Single extends SingleAbstract {
         }
       }
 
+      // completedEpisodes and totalAired always come from the same source -
+      // mixing a real completed count with a hardcoded totalAired of 0 (e.g.
+      // when the progress fetch fails) would make deriveWatchStatus's
+      // completed/total comparison meaningless and understate the total
+      // episode count.
       if (mappedSeasons.length) {
         completedEpisodes = mappedSeasons.reduce((sum, s) => sum + (Number(s.completed) || 0), 0);
+        totalAired = mappedSeasons.reduce((sum, s) => sum + (Number(s.aired) || 0), 0);
       } else if (cached) {
         completedEpisodes = cached.watchedEpisodes;
+        totalAired = cached.totalAired;
       }
-
-      totalAired = mappedSeasons.length
-        ? mappedSeasons.reduce((sum, s) => sum + (Number(s.aired) || 0), 0)
-        : 0;
 
       // Per-season episode counts, used later to translate a flat episode
       // number back into (season, episode) pairs when writing history. Falls
@@ -403,25 +406,15 @@ export class Single extends SingleAbstract {
       if (isMovie) {
         // A movie is either watched (one history entry) or not.
         if (cur > 0 && last === 0) {
-          const response = await this.call(
-            '/sync/history',
-            {
-              movies: [
-                { ids: { trakt: this.animeInfo.traktId }, watched_at: new Date().toISOString() },
-              ],
-            },
-            false,
-            'POST',
-          );
-          this.logger.log('Movie history add response', response);
+          await this.postAndLog('Movie history add response', '/sync/history', {
+            movies: [
+              { ids: { trakt: this.animeInfo.traktId }, watched_at: new Date().toISOString() },
+            ],
+          });
         } else if (cur === 0 && last > 0) {
-          const response = await this.call(
-            '/sync/history/remove',
-            { movies: [{ ids: { trakt: this.animeInfo.traktId } }] },
-            false,
-            'POST',
-          );
-          this.logger.log('Movie history remove response', response);
+          await this.postAndLog('Movie history remove response', '/sync/history/remove', {
+            movies: [{ ids: { trakt: this.animeInfo.traktId } }],
+          });
         }
       } else if (cur > last) {
         const now = new Date().toISOString();
@@ -430,26 +423,18 @@ export class Single extends SingleAbstract {
           number,
           episodes: epNumbers.map(n => ({ number: n, watched_at: now })),
         }));
-        const response = await this.call(
-          '/sync/history',
-          { shows: [{ ids: { trakt: this.animeInfo.traktId }, seasons }] },
-          false,
-          'POST',
-        );
-        this.logger.log('Episode history add response', response);
+        await this.postAndLog('Episode history add response', '/sync/history', {
+          shows: [{ ids: { trakt: this.animeInfo.traktId }, seasons }],
+        });
       } else if (cur < last) {
         const grouped = helper.groupFlatEpisodesBySeason(cur + 1, last, this.animeInfo.seasonsMeta);
         const seasons = Array.from(grouped.entries()).map(([number, epNumbers]) => ({
           number,
           episodes: epNumbers.map(n => ({ number: n })),
         }));
-        const response = await this.call(
-          '/sync/history/remove',
-          { shows: [{ ids: { trakt: this.animeInfo.traktId }, seasons }] },
-          false,
-          'POST',
-        );
-        this.logger.log('Episode history remove response', response);
+        await this.postAndLog('Episode history remove response', '/sync/history/remove', {
+          shows: [{ ids: { trakt: this.animeInfo.traktId }, seasons }],
+        });
       }
 
       this.lastSyncedEp = cur;
@@ -461,24 +446,16 @@ export class Single extends SingleAbstract {
 
       if (status === 'plantowatch') {
         if (!this.animeInfo.inWatchlist) {
-          const response = await this.call(
-            '/sync/watchlist',
-            { [media]: [{ ids: { trakt: this.animeInfo.traktId } }] },
-            false,
-            'POST',
-          );
-          this.logger.log('Watchlist add response', response);
+          await this.postAndLog('Watchlist add response', '/sync/watchlist', {
+            [media]: [{ ids: { trakt: this.animeInfo.traktId } }],
+          });
           this.animeInfo.inWatchlist = true;
         }
       } else if (this.animeInfo.inWatchlist) {
         // For watching / completed / on-hold / dropped → remove from watchlist
-        const response = await this.call(
-          '/sync/watchlist/remove',
-          { [media]: [{ ids: { trakt: this.animeInfo.traktId } }] },
-          false,
-          'POST',
-        );
-        this.logger.log('Watchlist remove response', response);
+        await this.postAndLog('Watchlist remove response', '/sync/watchlist/remove', {
+          [media]: [{ ids: { trakt: this.animeInfo.traktId } }],
+        });
         this.animeInfo.inWatchlist = false;
       }
     }
@@ -486,28 +463,18 @@ export class Single extends SingleAbstract {
     // ── Rating ────────────────────────────────────────────────────────────────
     if (this.ratingUpdate) {
       if (this.animeInfo.userRating) {
-        const response = await this.call(
-          '/sync/ratings',
-          {
-            [media]: [
-              {
-                rating: this.animeInfo.userRating,
-                ids: { trakt: this.animeInfo.traktId },
-              },
-            ],
-          },
-          false,
-          'POST',
-        );
-        this.logger.log('Rating add response', response);
+        await this.postAndLog('Rating add response', '/sync/ratings', {
+          [media]: [
+            {
+              rating: this.animeInfo.userRating,
+              ids: { trakt: this.animeInfo.traktId },
+            },
+          ],
+        });
       } else {
-        const response = await this.call(
-          '/sync/ratings/remove',
-          { [media]: [{ ids: { trakt: this.animeInfo.traktId } }] },
-          false,
-          'POST',
-        );
-        this.logger.log('Rating remove response', response);
+        await this.postAndLog('Rating remove response', '/sync/ratings/remove', {
+          [media]: [{ ids: { trakt: this.animeInfo.traktId } }],
+        });
       }
     }
 
@@ -566,6 +533,13 @@ export class Single extends SingleAbstract {
         'POST',
       ),
     ]);
+  }
+
+  // Every write in _sync() is a POST followed by the same "log the response"
+  // step - factored out so each call site only states the endpoint and payload.
+  private async postAndLog(label: string, url: string, data: any): Promise<void> {
+    const response = await this.call(url, data, false, 'POST');
+    this.logger.log(label, response);
   }
 
   protected syncList = helper.syncList;

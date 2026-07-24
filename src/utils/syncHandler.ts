@@ -43,11 +43,11 @@ export async function generateSync(
 
 // Simkl's per-MAL-entry season mapping isn't reliable enough for franchises
 // split across multiple MAL entries (one per season) to each write to their
-// own Trakt season independently - confirmed in production: two MAL entries
-// of the same franchise both resolving to "season 1" and repeatedly undoing
-// each other's history/rating writes. Rather than trust that mapping at all
-// for these, collapse every MAL entry that resolves to the same Trakt show
-// into a single write: sum their watched-episode counts and let
+// own Trakt season independently - two MAL entries of the same franchise can
+// both resolve to "season 1" and repeatedly undo each other's history/rating
+// writes. Rather than trust that mapping at all for these, collapse every
+// MAL entry that resolves to the same Trakt show into a single write: sum
+// their watched-episode counts and let
 // Trakt/single.ts (in "consolidate" mode) spread that flat total across
 // every real season Trakt reports, skipping status and rating entirely so
 // this can never re-introduce the same fight over those fields.
@@ -139,26 +139,33 @@ async function isTraktMissingSatisfied(miss: any): Promise<boolean> {
   await single.update();
   if (!single.isOnList()) return false;
 
+  const slaveScore = single.getScore();
+  const slaveStatus = single.getStatus();
+
   // Reuse changeCheck so "already synced" is judged by the exact same rules
   // (including the Trakt status-projection block) as a normal diff check -
   // just fed with this one entry's real, season-scoped state instead of the
-  // franchise-collapsed bulk row.
+  // franchise-collapsed bulk row. Consolidated entries never carry their own
+  // score/status (consolidateTraktMultiSeasonFranchises skips both), so fall
+  // back to whatever Trakt already reports instead of comparing against
+  // `undefined`, which would always read as a mismatch and defeat the whole
+  // point of this check.
   const item = {
     diff: false,
     master: {
       uid: miss.malId,
       type: miss.type,
-      score: miss.score,
+      score: miss.score ?? slaveScore,
       watchedEp: miss.watchedEp,
-      status: miss.status,
+      status: miss.status ?? slaveStatus,
     },
     slaves: [
       {
         url: single.getDisplayUrl(),
-        score: single.getScore(),
+        score: slaveScore,
         watchedEp: single.getEpisode(),
         totalEp: single.getTotalEpisodes(),
-        status: single.getStatus(),
+        status: slaveStatus,
         diff: {},
       },
     ],

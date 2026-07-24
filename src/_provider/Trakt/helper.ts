@@ -6,11 +6,10 @@ export const clientId = __MAL_SYNC_KEYS__.trakt.id;
 const clientSecret = __MAL_SYNC_KEYS__.trakt.secret;
 
 // NOTE: api.trakt.tv responds 500 to any write (POST) carrying a cross-site
-// Origin header - a server-side regression from their 2026-07 auth migration
-// (verified live: same request without Origin works; with any foreign Origin
-// it dies before reaching authentication). Browsers always attach Origin to
-// extension POSTs and fetch can't unset it, so declarative_net.json rule 2
-// strips it from every api.trakt.tv request.
+// Origin header - a server-side bug on Trakt's end, the same request without
+// Origin works fine. Browsers always attach Origin to extension POSTs and
+// fetch can't unset it, so declarative_net.json rule 2 strips it from every
+// api.trakt.tv request.
 const apiBase = 'https://api.trakt.tv';
 
 // Trakt authentication uses the DEVICE flow, not the authorization-code flow:
@@ -704,12 +703,10 @@ let cacheList: Record<number, TraktCachedShow> | undefined;
 // `last_activities` only bumps its timestamps on additions (watched_at,
 // rated_at, ...) - Trakt has no field that reflects a user clearing/removing
 // history from their own site, so that comparison alone can never notice a
-// manual wipe done outside the extension. Confirmed live: after fully
-// clearing a Trakt account's history, the extension kept reporting "Trakt
-// list up to date" and replayed a 120-item stale snapshot. `forceFresh`
-// skips the shortcut entirely; the bulk list-sync page's own initial fetch
-// uses it so the one snapshot every downstream lazy per-item call in that
-// session builds on is never more than one real fetch old.
+// manual wipe done outside the extension. `forceFresh` skips the shortcut
+// entirely; the bulk list-sync page's own initial fetch uses it so the one
+// snapshot every downstream lazy per-item call in that session builds on is
+// never more than one real fetch old.
 export async function syncList(
   lazy = false,
   forceFresh = false,
