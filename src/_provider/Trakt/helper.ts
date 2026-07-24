@@ -131,12 +131,14 @@ export function deriveWatchStatus(params: {
   totalAired: number;
   inWatchlist: boolean;
 }): TraktWatchStatus {
-  const { completedEpisodes, totalAired, inWatchlist } = params;
+  const { completedEpisodes, totalAired } = params;
   if (completedEpisodes > 0 && totalAired > 0 && completedEpisodes >= totalAired) {
     return 'completed';
   }
   if (completedEpisodes > 0) return 'watching';
-  if (inWatchlist) return 'plantowatch';
+  // Nothing watched yet, on the watchlist or not: TraktWatchStatus has no "untracked" state, so
+  // plantowatch is the fallback either way. inWatchlist is kept on the signature (and still used
+  // by callers) as the natural place to fork this if a real distinction is ever needed.
   return 'plantowatch';
 }
 
