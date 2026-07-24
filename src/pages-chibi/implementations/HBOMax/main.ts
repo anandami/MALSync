@@ -1,7 +1,12 @@
 import type { ChibiGenerator } from '../../../chibiScript/ChibiGenerator';
 import { PageInterface } from '../../pageInterface';
 
-const domain = 'https://www.max.com';
+// Confirmed live against a Brazil-based account: real playback URLs are on
+// play.hbomax.com (e.g. https://play.hbomax.com/video/watch/{seriesId}/{episodeId}),
+// not the global "Max" rebrand domain (max.com) this was originally written
+// against - that domain may still be accurate for other regions/rollout
+// stages, but this implementation was only verified against play.hbomax.com.
+const domain = 'https://play.hbomax.com';
 
 const TITLE_SELECTOR = '[data-testid="player-ux-asset-title"]';
 const SEASON_EPISODE_SELECTOR = '[data-testid="player-ux-season-episode"]';
@@ -28,13 +33,13 @@ function episodeNumber($c: ChibiGenerator<unknown>) {
   );
 }
 
-// Pulls the id out of either /video/{seriesId}/{episodeId} or /watch/{id}.
-// Deliberately not a fixed path-segment index: testing the equivalent Prime
-// Video URLs live turned up a locale-prefixed variant (/-/{locale}/detail/{id})
-// that a fixed index would misread, so this reads the id relative to
-// "video/"/"watch/" wherever they land in the path instead.
+// Pulls the series id out of /video/watch/{seriesId}/{episodeId} (the confirmed
+// real path) or a bare /watch/{id}. Not a fixed path-segment index: testing
+// the equivalent Prime Video URLs live turned up a locale-prefixed variant
+// (/-/{locale}/detail/{id}) that a fixed index would misread, so this reads
+// the id relative to "video/watch/"/"watch/" wherever it lands in the path.
 function currentId($c: ChibiGenerator<unknown>) {
-  return $c.url().regex('/(?:video|watch)/([^/?#]+)', 1);
+  return $c.url().regex('(?:video/watch|watch)/([^/?#]+)', 1);
 }
 
 export const HBOMax: PageInterface = {
@@ -43,7 +48,7 @@ export const HBOMax: PageInterface = {
   languages: ['Many'],
   type: 'anime',
   urls: {
-    match: ['*://www.max.com/*'],
+    match: ['*://play.hbomax.com/*'],
   },
   sync: {
     isSyncPage($c) {
