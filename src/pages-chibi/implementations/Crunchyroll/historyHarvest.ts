@@ -9,13 +9,27 @@
 // out of view is lost. There's no separate series link in the card; the "Reproduzir" link's
 // aria-label ("Reproduzir Episódio {N} de {Título}") carries both episode and series title.
 //
-// A direct fetch() to Crunchyroll's own paginated watch-history JSON API was tried and reverted
-// (2026-07-22): content/v2/{accountId}/watch-history is NOT cookie-authenticated - confirmed live
-// that even a bare fetch() run from the Crunchyroll page's own console (no extension involved)
-// gets a 401. Their own JS must attach something beyond cookies (a bearer token minted/rotated
-// internally) that isn't visible in a HAR capture. Replicating that would mean reverse-engineering
-// an undocumented internal auth mechanism - fragile and not something to imitate. Scrolling the
-// real page like a user does stays the reliable option, just slower for very long histories.
+// Two real bugs were confirmed live (2026-07) via diagnostic logging and fixed here:
+// 1. The date regex (`\b\d{2}\/\d{2}\/\d{4}\b`) could never match - `item.textContent` concatenates
+//    sibling text nodes with no separator ("...o ano que chega20/07/2026Não recomendado..."), so
+//    the `\b` word-boundary assertion right before/after the digits never has anywhere to match
+//    since both neighboring characters are word characters. Fixed by dropping the `\b` anchors -
+//    the `/` separators in the date itself are distinctive enough without them.
+// 2. findScrollContainer trusted computed `overflow-y` styling to find the real scrollable
+//    ancestor, which sometimes missed it entirely (Crunchyroll's actual scroll panel apparently
+//    isn't a direct styled ancestor of the list in every layout) and fell back to scrolling the
+//    whole page - confirmed live: scrollTop got stuck exactly at that page's own
+//    scrollHeight-clientHeight after only ~6-14 items, well before the real history was exhausted.
+//    Fixed by testing genuine scrollability empirically (nudge scrollTop, check it actually moved)
+//    instead of trusting CSS.
+//
+// A direct fetch() to Crunchyroll's own paginated watch-history JSON API was tried twice and
+// reverted both times (2026-07-22 and 2026-07-24): even though a real HAR capture shows the
+// page's own JS successfully calling content/v2/{accountId}/watch-history, replicating that same
+// call - both from this content script and from a bare fetch() typed directly into the page's own
+// console - consistently gets a 401 with an empty body, consistent with an edge-level (Cloudflare)
+// bot-detection block rather than a missing parameter this code could fix. Not something to keep
+// fighting or try to evade - scrolling the real page like a user does stays the reliable option.
 
 type HarvestedEntry = {
   seriesId: string;
@@ -47,6 +61,11 @@ const START_MESSAGE = 'crunchyrollHarvestStart';
 const STATUS_MESSAGE = 'crunchyrollHarvestStatus';
 
 let state: HarvestState = { status: 'idle' };
+
+// Dedup key for the "no date matched" diagnostic below - collect() re-parses the same DOM node
+// many times while it's in the (virtualized) viewport, and logging every pass would flood the
+// console for a run that can take minutes.
+const loggedMissingDateFor = new Set<string>();
 
 export function initCrunchyrollHistoryHarvest() {
   if (!isHistoryPage()) return;
@@ -110,6 +129,14 @@ async function harvest(): Promise<{ data: HarvestedEntry[]; reachedBottom: boole
       }
       if (parsed.episode > existing.episode) {
         existing.episode = parsed.episode;
+        // May be '' if this card's date text hasn't rendered yet - don't treat that as final,
+        // the branch below backfills it on a later collect() pass while the card is still in
+        // the (virtualized) DOM, instead of the empty value sticking forever.
+        existing.date = parsed.date;
+      } else if (parsed.episode === existing.episode && parsed.date && !existing.date) {
+        // Same row seen again with its date now rendered - fill it in. Without this, a card
+        // whose date lagged behind on the pass that first recorded its (highest) episode number
+        // would never get a date at all, since the branch above only fires on a higher episode.
         existing.date = parsed.date;
       }
       if (parsed.episode === 1 && !existing.firstEpisodeDate) {
@@ -132,7 +159,7 @@ async function harvest(): Promise<{ data: HarvestedEntry[]; reachedBottom: boole
 }
 
 function parseHistoryItem(item: Element): HarvestedEntry | null {
-  const playLink = item.querySelector('a[aria-label^="Reproduzir"]') as HTMLAnchorElement | null;
+  const playLink = item.querySelector('a[aria-label^="Reproduzir"]');
   const ariaLabel = playLink?.getAttribute('aria-label') || '';
   const match = ariaLabel.match(/^Reproduzir Epis[óo]dio (\d+) de (.+)$/);
   if (!match) return null;
@@ -141,8 +168,22 @@ function parseHistoryItem(item: Element): HarvestedEntry | null {
   const seriesTitle = match[2].trim();
   if (!seriesTitle) return null;
 
-  const dateMatch = item.textContent?.match(/\b\d{2}\/\d{2}\/\d{4}\b/);
+  // No \b anchors - item.textContent concatenates sibling text nodes with no whitespace
+  // separator, so a word-boundary check right before/after the digits fails whenever the
+  // adjacent character (in surrounding prose, on either side) is itself a letter/digit. The `/`
+  // separators inside the date pattern are distinctive enough on their own.
+  const dateMatch = item.textContent?.match(/\d{2}\/\d{2}\/\d{4}/);
   const date = dateMatch ? dateMatch[0] : '';
+
+  if (!date && !loggedMissingDateFor.has(seriesTitle)) {
+    loggedMissingDateFor.add(seriesTitle);
+    con.log(
+      '[Crunchyroll History] no DD/MM/YYYY date found for',
+      seriesTitle,
+      '- raw card text:',
+      (item.textContent || '').slice(0, 300),
+    );
+  }
 
   return {
     seriesId: normalizeTitle(seriesTitle),
@@ -166,17 +207,31 @@ async function waitForFirstItems(): Promise<void> {
   }
 }
 
+// Walks every ancestor from `start` up to the document root and picks the first one that's
+// genuinely scrollable, verified by actually nudging scrollTop and checking it moved - trusting
+// computed `overflow-y` alone (the previous approach) missed Crunchyroll's real scroll panel in
+// at least some layouts and silently fell back to scrolling the whole page instead, confirmed
+// live via scrollTop getting stuck exactly at that page's own max after only ~6-14 items.
 function findScrollContainer(start: Element): Element {
+  const candidates: HTMLElement[] = [];
   let el: Element | null = start;
-  while (el && el !== document.body && el !== document.documentElement) {
-    const elStyle = window.getComputedStyle(el);
-    const scrollable = elStyle.overflowY === 'auto' || elStyle.overflowY === 'scroll';
-    if (scrollable && el.scrollHeight > el.clientHeight + 4) {
-      return el;
-    }
+  while (el) {
+    candidates.push(el as HTMLElement);
     el = el.parentElement;
   }
-  return document.scrollingElement || document.documentElement;
+  const fallback = (document.scrollingElement || document.documentElement) as HTMLElement;
+  if (!candidates.includes(fallback)) candidates.push(fallback);
+
+  for (let i = 0; i < candidates.length; i++) {
+    const c = candidates[i];
+    if (c.scrollHeight <= c.clientHeight + 4) continue;
+    const before = c.scrollTop;
+    c.scrollTop = before + 50;
+    const moved = c.scrollTop !== before;
+    c.scrollTop = before;
+    if (moved) return c;
+  }
+  return fallback;
 }
 
 // Confirmed live: jumping 80% of a viewport every 500ms can outrun the virtualized list's own
@@ -189,6 +244,17 @@ async function scrollCollecting(collect: () => void): Promise<boolean> {
   const list =
     document.querySelector('[role="list"]') || document.querySelector('[role="listitem"]');
   const scrollContainer = findScrollContainer(list || document.body);
+
+  con.log(
+    '[Crunchyroll History] scroll container:',
+    scrollContainer === document.documentElement || scrollContainer === document.body
+      ? '(page itself - no scrollable ancestor matched)'
+      : `<${scrollContainer.tagName.toLowerCase()} class="${(scrollContainer as HTMLElement).className}">`,
+    '- scrollHeight:',
+    scrollContainer.scrollHeight,
+    'clientHeight:',
+    scrollContainer.clientHeight,
+  );
 
   let lastScrollTop = -1;
   let noProgressRounds = 0;
@@ -211,6 +277,18 @@ async function scrollCollecting(collect: () => void): Promise<boolean> {
       noProgressRounds = 0;
     } else {
       noProgressRounds++;
+      con.log(
+        '[Crunchyroll History] no progress, round',
+        noProgressRounds,
+        'of',
+        maxNoProgressRounds,
+        '- scrollTop:',
+        scrollContainer.scrollTop,
+        'scrollHeight:',
+        scrollContainer.scrollHeight,
+        'items in DOM:',
+        document.querySelectorAll('[role="listitem"]').length,
+      );
       // Give the lazy-loaded batch extra time to arrive before counting this round as real
       // "no progress" - a still-loading page and a genuinely finished list look identical for a
       // moment, only patience tells them apart.
@@ -221,6 +299,14 @@ async function scrollCollecting(collect: () => void): Promise<boolean> {
     }
 
     if (noProgressRounds >= maxNoProgressRounds) {
+      con.log(
+        '[Crunchyroll History] giving up after',
+        attempt + 1,
+        'scroll attempts - final scrollTop:',
+        scrollContainer.scrollTop,
+        'scrollHeight:',
+        scrollContainer.scrollHeight,
+      );
       reachedBottom = true;
       break;
     }
