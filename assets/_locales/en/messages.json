@@ -889,6 +889,212 @@
         "message": "",
         "description": "Text in case of problems with the localSync import. This is the string after settings_LocalSync_Help_LinkText. Possible emtpy if language does not need it"
     },
+    "settings_CrunchyrollImport_Label": {
+        "message": "Import Crunchyroll history",
+        "description": "Label for the Crunchyroll watch-history import section in settings"
+    },
+    "crunchyrollImport_FetchButton": {
+        "message": "Fetch Crunchyroll history",
+        "description": "Button to start harvesting the Crunchyroll watch history"
+    },
+    "crunchyrollImport_FetchButtonLoading": {
+        "message": "Fetching...",
+        "description": "Fetch button label while the Crunchyroll history harvest is running"
+    },
+    "crunchyrollImport_LoadingWarning": {
+        "message": "A Crunchyroll tab will open in the background and scroll through your history on its own — this can take a few minutes for a long history. It stays open at the end (it won't close itself) so you can check its console if needed.",
+        "description": "Warning shown while the Crunchyroll history harvest is running"
+    },
+    "crunchyrollImport_NotReachedBottomWarning": {
+        "message": "Scrolling didn't reach the end of your Crunchyroll history (it's quite long). The result below may not cover everything you've watched — run it again periodically to catch up on what's missing.",
+        "description": "Warning shown when the Crunchyroll history harvest stopped before reaching the end of the list"
+    },
+    "crunchyrollImport_NothingNew": {
+        "message": "Nothing new found in your Crunchyroll history.",
+        "description": "Shown when the Crunchyroll import plan has no updates and no new entries"
+    },
+    "crunchyrollImport_UpdatesHeader": {
+        "message": "Updates ($count$)",
+        "description": "Header above the list of existing entries the Crunchyroll import would update",
+        "placeholders": {
+            "count": {
+                "content": "$1",
+                "example": "3"
+            }
+        }
+    },
+    "crunchyrollImport_EpisodeChange": {
+        "message": "Episode $episode$ →",
+        "description": "Shows the current episode before the new episode number found by the Crunchyroll import",
+        "placeholders": {
+            "episode": {
+                "content": "$1",
+                "example": "5"
+            }
+        }
+    },
+    "crunchyrollImport_EpisodeUnchanged": {
+        "message": "Episode $episode$ (no change)",
+        "description": "Shown when the Crunchyroll import found no episode progress change for an entry",
+        "placeholders": {
+            "episode": {
+                "content": "$1",
+                "example": "5"
+            }
+        }
+    },
+    "crunchyrollImport_FinishDateArrow": {
+        "message": "Finish date →",
+        "description": "Label before the finish date the Crunchyroll import would write, followed by the date itself"
+    },
+    "crunchyrollImport_StartDateArrow": {
+        "message": "Start date →",
+        "description": "Label before the start date the Crunchyroll import would write, followed by the date itself"
+    },
+    "crunchyrollImport_PossibleNextSeasonWarning": {
+        "message": "Crunchyroll shows an episode past this entry's total — the next season was probably not found. Progress was capped at this entry's total.",
+        "description": "Warning shown when Crunchyroll's continuous episode numbering exceeds a matched entry's episode count"
+    },
+    "crunchyrollImport_NextSeasonLinked": {
+        "message": "Next season linked — check the new entry on your list.",
+        "description": "Shown after the user manually links the next season of a Crunchyroll franchise"
+    },
+    "crunchyrollImport_NextSeasonSuffix": {
+        "message": "$label$ (next season)",
+        "description": "Appended to the manual-link input placeholder when linking the season after a possible next-season match",
+        "placeholders": {
+            "label": {
+                "content": "$1",
+                "example": "Season link on MyAnimeList"
+            }
+        }
+    },
+    "crunchyrollImport_LinkButton": {
+        "message": "Link",
+        "description": "Button to manually link a Crunchyroll entry to a MAL/AniList/etc. URL"
+    },
+    "crunchyrollImport_LinkButtonLoading": {
+        "message": "Linking...",
+        "description": "Link button label while the manual link is being resolved"
+    },
+    "crunchyrollImport_MissingHeader": {
+        "message": "New entries ($count$)",
+        "description": "Header above the list of entries the Crunchyroll import would add to the user's list",
+        "placeholders": {
+            "count": {
+                "content": "$1",
+                "example": "2"
+            }
+        }
+    },
+    "crunchyrollImport_MissingStatusLine": {
+        "message": "$status$ — episode $episode$",
+        "description": "Status and episode number for a new entry the Crunchyroll import would create",
+        "placeholders": {
+            "status": {
+                "content": "$1",
+                "example": "Watching"
+            },
+            "episode": {
+                "content": "$2",
+                "example": "5"
+            }
+        }
+    },
+    "crunchyrollImport_FinishDateColon": {
+        "message": "Finish date: $date$",
+        "description": "Finish date for a new entry the Crunchyroll import would create",
+        "placeholders": {
+            "date": {
+                "content": "$1",
+                "example": "2026-07-20"
+            }
+        }
+    },
+    "crunchyrollImport_StartDateColon": {
+        "message": "Start date: $date$",
+        "description": "Start date for a new entry the Crunchyroll import would create",
+        "placeholders": {
+            "date": {
+                "content": "$1",
+                "example": "2026-07-01"
+            }
+        }
+    },
+    "crunchyrollImport_ApplyButton": {
+        "message": "Import",
+        "description": "Button to apply the Crunchyroll import plan to the user's list"
+    },
+    "crunchyrollImport_ApplyButtonLoading": {
+        "message": "Importing...",
+        "description": "Apply button label while the Crunchyroll import is being written"
+    },
+    "crunchyrollImport_UnmatchedHeader": {
+        "message": "Not found on $provider$ ($count$)",
+        "description": "Header above Crunchyroll series that couldn't be automatically matched to the sync provider",
+        "placeholders": {
+            "provider": {
+                "content": "$1",
+                "example": "MyAnimeList"
+            },
+            "count": {
+                "content": "$2",
+                "example": "1"
+            }
+        }
+    },
+    "crunchyrollImport_ManualLinkLabel": {
+        "message": "Season link on $provider$",
+        "description": "Placeholder for the manual-link text input in the Crunchyroll import",
+        "placeholders": {
+            "provider": {
+                "content": "$1",
+                "example": "MyAnimeList"
+            }
+        }
+    },
+    "crunchyrollImport_ResultSummary": {
+        "message": "$updated$ updated, $created$ created",
+        "description": "Summary shown after applying the Crunchyroll import",
+        "placeholders": {
+            "updated": {
+                "content": "$1",
+                "example": "3"
+            },
+            "created": {
+                "content": "$2",
+                "example": "1"
+            }
+        }
+    },
+    "crunchyrollImport_ResultErrors": {
+        "message": "$count$ with errors",
+        "description": "Shown after applying the Crunchyroll import if some entries failed",
+        "placeholders": {
+            "count": {
+                "content": "$1",
+                "example": "1"
+            }
+        }
+    },
+    "crunchyrollImport_InvalidLinkError": {
+        "message": "Invalid link — paste the full URL of the season's page.",
+        "description": "Error shown when the manually pasted link in the Crunchyroll import can't be parsed"
+    },
+    "crunchyrollImport_WrongProviderError": {
+        "message": "This link needs to be from $provider$ (your default sync destination).",
+        "description": "Error shown when the manually pasted link in the Crunchyroll import is for the wrong provider",
+        "placeholders": {
+            "provider": {
+                "content": "$1",
+                "example": "MyAnimeList"
+            }
+        }
+    },
+    "crunchyrollImport_LinkLoadError": {
+        "message": "Couldn't load information for this link — double-check the URL.",
+        "description": "Error shown when the manually pasted link in the Crunchyroll import can't be loaded"
+    },
     "settings_Animesync": {
         "message": "Anime sync",
         "description": "Anime sync"

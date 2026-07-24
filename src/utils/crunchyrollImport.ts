@@ -9,16 +9,13 @@ import { syncItem, syncMissing, getType } from './syncHandler';
 const HISTORY_URL = 'https://www.crunchyroll.com/history';
 const START_MESSAGE = 'crunchyrollHarvestStart';
 const STATUS_MESSAGE = 'crunchyrollHarvestStatus';
-// Covers establishing the very first connection to the tab's listener (before harvesting starts)
-// - confirmed live that even 60s wasn't consistently enough for this heavy a page to finish
-// loading and attach the listener. 5 minutes per the user's explicit request.
+// Generous ceiling for the tab's listener to attach - this is a heavy page and can be slow to load.
 const CONNECT_TIMEOUT_MS = 300000;
 const CONNECT_RETRY_MS = 500;
 const POLL_INTERVAL_MS = 3000;
-// Overall ceiling on how long polling will keep checking in before giving up - generous because a
-// long history's scroll can legitimately take a long time. Each individual poll is short-lived
-// (see the comment on historyHarvest.ts's START/STATUS split for why holding one long response
-// instead of polling turned out unreliable).
+// Overall ceiling on how long polling keeps checking in before giving up - generous because a long
+// history's scroll can legitimately take a while. Each individual poll is short-lived; see
+// historyHarvest.ts for why status is polled instead of held open in one long response.
 const MAX_HARVEST_MS = 1800000;
 
 export type HarvestedEntry = {
@@ -88,10 +85,6 @@ export async function harvestCrunchyrollHistory(): Promise<{
   entries: HarvestedEntry[];
   reachedBottom: boolean;
 }> {
-  // Backgrounded (active: false) - foregrounding this tab was tried at one point chasing a
-  // suspected Chrome background-tab throttling issue, but the actual bugs (a date regex that
-  // could never match, and the wrong element being scrolled - both fixed in historyHarvest.ts)
-  // reproduced identically either way, so there was nothing to gain from stealing the user's focus.
   const tab = await chrome.tabs.create({ url: HISTORY_URL, active: false });
   if (!tab.id) throw new Error('Could not open a Crunchyroll tab');
   const { id: tabId } = tab;
@@ -107,10 +100,8 @@ export async function harvestCrunchyrollHistory(): Promise<{
     const state = response?.state;
 
     if (state?.status === 'done') {
-      // Left open on purpose - closing it immediately took the DevTools console down with it
-      // before there was any chance to read it. The user closes it herself once she's done
-      // checking (or just ignores it - reopening the history page again next run doesn't care
-      // that an old tab is still sitting there).
+      // The tab is left open on purpose so its console stays readable for troubleshooting; the
+      // user can close it, or just leave it - the next run doesn't care that an old tab exists.
       const entries: HarvestedEntry[] = state.data || [];
       const reachedBottom = state.reachedBottom !== false;
       con.log(
@@ -214,14 +205,12 @@ function toIsoDate(dateStr: string): string | undefined {
 }
 
 type Progress = {
-  /** True when Crunchyroll's episode number exceeds this entry's own total - continuous
-   * numbering across a franchise's seasons (confirmed live: "Snow White with the Red Hair" runs
-   * a single episode count across what MAL splits into "Akagami no Shirayuki-hime" (12 eps) and
-   * "...2nd Season" - same class of problem HANDOFF.md documents for Trakt). Title search can't
-   * know a season split exists, so the episode written is capped at this entry's own total
-   * (never sent out of range) and flagged so the UI can tell the user a later season needs
-   * separate handling - this only prevents a bad write, it doesn't locate/write the next season.
-   */
+  /** True when Crunchyroll's episode number exceeds this entry's own total - Crunchyroll numbers
+   * episodes continuously across a franchise's seasons (e.g. "Snow White with the Red Hair") while
+   * the destination provider splits them into separate entries per season. Title search can't know
+   * a season split exists, so the episode written is capped at this entry's own total (never sent
+   * out of range) and flagged so the UI can offer linking the next season - this only prevents a
+   * bad write, it doesn't locate/write the next season on its own. */
   possibleNextSeason: boolean;
   cappedEpisode: number;
   /** Only set once the (capped) progress actually reaches this entry's own last episode - a
@@ -230,10 +219,10 @@ type Progress = {
   finishDate?: string;
   /** Date of episode 1, if it was also found in the scraped history. */
   startDate?: string;
-  /** True whenever a finishDate was set - per the user's rule, having a finish date is what
-   * makes an entry Completed rather than Watching (a start date isn't required: it's supplementary
-   * information, e.g. for a manually-linked continuation season the harvest can know the season
-   * finished without knowing exactly when it began). */
+  /** True whenever a finishDate was set - having a finish date is what makes an entry Completed
+   * rather than Watching (a start date isn't required: it's supplementary information, e.g. for a
+   * manually-linked continuation season the harvest can know the season finished without knowing
+   * exactly when it began). */
   completed: boolean;
 };
 
@@ -386,11 +375,11 @@ export async function resolveManualLink(
   try {
     syncType = getType(trimmedUrl);
   } catch (e) {
-    throw new Error('Link inválido — cole a URL completa da página da temporada.');
+    throw new Error(api.storage.lang('crunchyrollImport_InvalidLinkError'));
   }
   if (syncType !== expectedSyncMode) {
     throw new Error(
-      `Este link precisa ser do ${getManualLinkProviderTitle()} (seu destino de sincronização padrão).`,
+      api.storage.lang('crunchyrollImport_WrongProviderError', [getManualLinkProviderTitle()]),
     );
   }
 
@@ -400,7 +389,7 @@ export async function resolveManualLink(
   const malId = singleObj.getMalId();
   const title = singleObj.getTitle();
   if (!malId || !title) {
-    throw new Error('Não foi possível carregar informações deste link — confira a URL.');
+    throw new Error(api.storage.lang('crunchyrollImport_LinkLoadError'));
   }
 
   const totalEp = singleObj.getTotalEpisodes() || undefined;

@@ -3,33 +3,19 @@
 // a history list covering many series - this is plain, independent content-script logic instead,
 // gated on the /history path so it never interferes with the normal watch-page sync flow.
 //
-// Selectors confirmed against a live /pt-br/history page: the list is virtualized (react-window
-// style, [role="listitem"] rows positioned absolutely via `top`, only ~8-10 in the DOM at once) -
-// items must be collected DURING scrolling, not just once at the end, or everything that scrolls
-// out of view is lost. There's no separate series link in the card; the "Reproduzir" link's
-// aria-label ("Reproduzir Episódio {N} de {Título}") carries both episode and series title.
+// The list is virtualized (react-window style, [role="listitem"] rows positioned absolutely via
+// `top`, only ~8-10 in the DOM at once), so items must be collected DURING scrolling, not just
+// once at the end, or everything that scrolls out of view is lost. There's no separate series
+// link in the card; the "Reproduzir" link's aria-label ("Reproduzir Episódio {N} de {Título}")
+// carries both episode and series title. Only verified against the Portuguese (pt-BR) Crunchyroll
+// UI - a different display language renders a different aria-label and won't match parseHistoryItem
+// below, so history harvesting silently finds nothing for those users until someone extends the
+// pattern for their language.
 //
-// Two real bugs were confirmed live (2026-07) via diagnostic logging and fixed here:
-// 1. The date regex (`\b\d{2}\/\d{2}\/\d{4}\b`) could never match - `item.textContent` concatenates
-//    sibling text nodes with no separator ("...o ano que chega20/07/2026Não recomendado..."), so
-//    the `\b` word-boundary assertion right before/after the digits never has anywhere to match
-//    since both neighboring characters are word characters. Fixed by dropping the `\b` anchors -
-//    the `/` separators in the date itself are distinctive enough without them.
-// 2. findScrollContainer trusted computed `overflow-y` styling to find the real scrollable
-//    ancestor, which sometimes missed it entirely (Crunchyroll's actual scroll panel apparently
-//    isn't a direct styled ancestor of the list in every layout) and fell back to scrolling the
-//    whole page - confirmed live: scrollTop got stuck exactly at that page's own
-//    scrollHeight-clientHeight after only ~6-14 items, well before the real history was exhausted.
-//    Fixed by testing genuine scrollability empirically (nudge scrollTop, check it actually moved)
-//    instead of trusting CSS.
-//
-// A direct fetch() to Crunchyroll's own paginated watch-history JSON API was tried twice and
-// reverted both times (2026-07-22 and 2026-07-24): even though a real HAR capture shows the
-// page's own JS successfully calling content/v2/{accountId}/watch-history, replicating that same
-// call - both from this content script and from a bare fetch() typed directly into the page's own
-// console - consistently gets a 401 with an empty body, consistent with an edge-level (Cloudflare)
-// bot-detection block rather than a missing parameter this code could fix. Not something to keep
-// fighting or try to evade - scrolling the real page like a user does stays the reliable option.
+// A direct fetch() to Crunchyroll's own paginated watch-history JSON API would be more robust than
+// scrolling, but consistently returns a 401 with an empty body - consistent with an edge-level
+// (Cloudflare) bot-detection block rather than a missing parameter, so scrolling the real page like
+// a user does is the reliable option here.
 
 type HarvestedEntry = {
   seriesId: string;
@@ -46,17 +32,14 @@ type HarvestState =
   | { status: 'done'; data: HarvestedEntry[]; reachedBottom: boolean }
   | { status: 'error'; error: string };
 
-// Only chrome.tabs.sendMessage (targeted at this tab) is used to reach this listener - never
-// chrome.runtime.sendMessage, which broadcasts to the background service worker too and
-// (src/background/messageHandler.ts:58-59) throws "Unknown action" for any message name it
-// doesn't explicitly handle.
+// Only chrome.tabs.sendMessage (targeted at this tab) reaches this listener - never
+// chrome.runtime.sendMessage, which also broadcasts to the background service worker and
+// (src/background/messageHandler.ts) throws "Unknown action" for any name it doesn't handle.
 //
-// Start/poll instead of one long-held request-response (2026-07-22): holding a single
-// chrome.tabs.sendMessage response pending for the whole scroll (which can take many minutes for
-// a long history) turned out unreliable - confirmed live the caller's promise timed out while the
-// scroll kept running fine in the tab, meaning the message port itself doesn't survive being held
-// open that long, independent of any timeout value chosen on the caller's side. Every individual
-// message here now resolves immediately; the caller polls status separately.
+// Start/poll instead of one long-held request-response: a chrome.tabs.sendMessage response left
+// pending for the whole scroll (which can take minutes for a long history) doesn't survive that
+// long - the message port itself gets torn down regardless of timeout. Every message here resolves
+// immediately; the caller polls status separately.
 const START_MESSAGE = 'crunchyrollHarvestStart';
 const STATUS_MESSAGE = 'crunchyrollHarvestStatus';
 
@@ -168,10 +151,9 @@ function parseHistoryItem(item: Element): HarvestedEntry | null {
   const seriesTitle = match[2].trim();
   if (!seriesTitle) return null;
 
-  // No \b anchors - item.textContent concatenates sibling text nodes with no whitespace
-  // separator, so a word-boundary check right before/after the digits fails whenever the
-  // adjacent character (in surrounding prose, on either side) is itself a letter/digit. The `/`
-  // separators inside the date pattern are distinctive enough on their own.
+  // No \b anchors: item.textContent concatenates sibling text nodes with no separator, so a
+  // word-boundary check would fail whenever the surrounding prose touches the digits directly.
+  // The `/` separators in the date pattern are distinctive enough on their own.
   const dateMatch = item.textContent?.match(/\d{2}\/\d{2}\/\d{4}/);
   const date = dateMatch ? dateMatch[0] : '';
 
@@ -208,10 +190,9 @@ async function waitForFirstItems(): Promise<void> {
 }
 
 // Walks every ancestor from `start` up to the document root and picks the first one that's
-// genuinely scrollable, verified by actually nudging scrollTop and checking it moved - trusting
-// computed `overflow-y` alone (the previous approach) missed Crunchyroll's real scroll panel in
-// at least some layouts and silently fell back to scrolling the whole page instead, confirmed
-// live via scrollTop getting stuck exactly at that page's own max after only ~6-14 items.
+// genuinely scrollable, verified by nudging scrollTop and checking it moved. Trusting computed
+// `overflow-y` alone isn't reliable here - Crunchyroll's real scroll panel isn't always a styled
+// ancestor of the list, which would silently fall back to scrolling the whole page instead.
 function findScrollContainer(start: Element): Element {
   const candidates: HTMLElement[] = [];
   let el: Element | null = start;
@@ -234,12 +215,10 @@ function findScrollContainer(start: Element): Element {
   return fallback;
 }
 
-// Confirmed live: jumping 80% of a viewport every 500ms can outrun the virtualized list's own
-// lazy-loading - scrollHeight briefly stops growing not because the history actually ended, but
-// because the next batch hasn't finished loading yet, and the old logic mistook that pause for
-// "reached the bottom". Scroll in smaller steps, wait longer per step, and when nothing seems to
-// be happening give it extra patience (a longer wait + recheck) before trusting that it's really
-// the end - only concede after several consecutive rounds of genuinely no progress.
+// Scrolls in small steps and waits between them because the virtualized list's lazy-loading can
+// lag behind a faster scroll - scrollHeight briefly stalling doesn't mean the history actually
+// ended, just that the next batch hasn't arrived yet. Only gives up after several consecutive
+// rounds with no growth or movement, each with extra time for a lazy-loaded batch to arrive.
 async function scrollCollecting(collect: () => void): Promise<boolean> {
   const list =
     document.querySelector('[role="list"]') || document.querySelector('[role="listitem"]');

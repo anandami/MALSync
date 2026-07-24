@@ -256,7 +256,7 @@ export const tracking: ConfObj[] = [
   },
   {
     key: 'crunchyrollImport',
-    title: () => 'Importar histórico Crunchyroll',
+    title: () => api.storage.lang('settings_CrunchyrollImport_Label'),
     condition: () => api.type === 'webextension',
     component: SettingsCrunchyrollImport,
   },
