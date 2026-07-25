@@ -193,10 +193,14 @@ async function waitForFirstItems(): Promise<void> {
 // genuinely scrollable, verified by nudging scrollTop and checking it moved. Trusting computed
 // `overflow-y` alone isn't reliable here - Crunchyroll's real scroll panel isn't always a styled
 // ancestor of the list, which would silently fall back to scrolling the whole page instead.
-// Every candidate is logged (not just the winner) so a run where none of them qualify - e.g. a
-// virtualized list driven by wheel/transform instead of native scrollTop - is diagnosable from the
-// console instead of just silently falling back to the page.
-function findScrollContainer(start: Element): Element {
+// The check for "moved" is async with a short wait, not an immediate read right after the nudge:
+// an element with CSS `scroll-behavior: smooth` animates scrollTop instead of jumping it, so
+// reading it back on the very next line still shows the old value and wrongly fails a genuinely
+// scrollable element - confirmed live on a ~2800-episode history, where this caused every real
+// candidate to fail the check and silently fall back to scrolling the page itself instead.
+// Every candidate is logged (not just the winner) so a run where none of them qualify is
+// diagnosable from the console instead of just silently falling back.
+async function findScrollContainer(start: Element): Promise<Element> {
   const candidates: HTMLElement[] = [];
   let el: Element | null = start;
   while (el) {
@@ -214,6 +218,8 @@ function findScrollContainer(start: Element): Element {
     if (tallEnough) {
       const before = c.scrollTop;
       c.scrollTop = before + 50;
+      // eslint-disable-next-line no-await-in-loop
+      await utils.wait(80);
       moved = c.scrollTop !== before;
       c.scrollTop = before;
     }
@@ -245,7 +251,7 @@ async function scrollCollecting(collect: () => void): Promise<boolean> {
   // only place on the page using that role (e.g. a recommendations rail above it), and starting
   // the ancestor walk from the wrong list silently searches the wrong part of the page entirely.
   const list = document.querySelector('[role="listitem"]');
-  const scrollContainer = findScrollContainer(list || document.body);
+  const scrollContainer = await findScrollContainer(list || document.body);
 
   con.log(
     '[Crunchyroll History] scroll container:',
