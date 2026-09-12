@@ -1173,14 +1173,6 @@
         "message": "Access was denied on trakt.tv. Click \"Connect Trakt\" to try again.",
         "description": "List Sync error shown when the user denied the authorization request on Trakt"
     },
-    "settings_listsync_select_all": {
-        "message": "Select all",
-        "description": "List Sync button that selects every item for the next sync"
-    },
-    "settings_listsync_select_none": {
-        "message": "Deselect all",
-        "description": "List Sync button that deselects every item for the next sync"
-    },
     "settings_listsync_itemcount": {
         "message": "Items to sync:",
         "description": "List Sync label to show the total number of items that need to be synced"
