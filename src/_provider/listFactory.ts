@@ -27,10 +27,15 @@ export function getOnlyList(...args) {
   return getListObj(args);
 }
 
-export function getListbyType(syncMode: string, args: any[] = []) {
+type ListArgs = [status?: number, listType?: 'anime' | 'manga', sorting?: string];
+
+export function getListbyType(syncMode: string, args: ListArgs = []) {
   return getListObj(args, syncMode);
 }
 
+// Kept loosely typed (unlike getListbyType above) because getList()/getOnlyList() forward their
+// own untyped ...args rest parameters straight through here - narrowing this to ListArgs would
+// reject those call sites' `any[]` at the type level despite them being valid at runtime.
 function getListObj(args, syncMode = '') {
   if (!syncMode) {
     syncMode = helper.getSyncMode(args[1] ? args[1] : 'anime');

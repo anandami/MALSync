@@ -48,18 +48,18 @@
             >
             <div v-if="item.newEp !== item.currentEp">
               {{ lang('crunchyrollImport_EpisodeChange', [String(item.currentEp)]) }}
-              <text class="highlight">{{ item.newEp }}</text>
+              <span class="highlight">{{ item.newEp }}</span>
             </div>
             <div v-else>
               {{ lang('crunchyrollImport_EpisodeUnchanged', [String(item.currentEp)]) }}
             </div>
             <div v-if="item.finishDate">
               {{ lang('crunchyrollImport_FinishDateArrow') }}
-              <text class="highlight">{{ item.finishDate }}</text>
+              <span class="highlight">{{ item.finishDate }}</span>
             </div>
             <div v-if="item.startDate">
               {{ lang('crunchyrollImport_StartDateArrow') }}
-              <text class="highlight">{{ item.startDate }}</text>
+              <span class="highlight">{{ item.startDate }}</span>
             </div>
             <SettingsCrunchyrollNextSeason
               v-if="item.nextSeason"
@@ -112,7 +112,7 @@
         </Section>
       </Description>
 
-      <FormButton color="primary" :disabled="applying" @click="apply()">
+      <FormButton color="primary" :disabled="applying || hasActiveLink" @click="apply()">
         {{
           applying
             ? lang('crunchyrollImport_ApplyButtonLoading')
@@ -168,7 +168,7 @@
 </template>
 
 <script lang="ts" setup>
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import {
   harvestCrunchyrollHistory,
   matchToMal,
@@ -221,6 +221,16 @@ async function startHarvest() {
   error.value = '';
   plan.value = null;
   result.value = null;
+  // A fresh harvest builds a brand new plan - any link state from a previous run (which items are
+  // linked, pending inputs/errors) refers to items that may not exist in the new plan at all, and
+  // stale "linked" state would wrongly hide an item that still needs linking this time around.
+  linkInputs.value = {};
+  linkErrors.value = {};
+  linking.value = {};
+  nextSeasonLinkInputs.value = {};
+  nextSeasonLinkErrors.value = {};
+  nextSeasonLinking.value = {};
+  linkedNextSeasons.value = {};
   try {
     const { entries, reachedBottom: reachedBottomResult } = await harvestCrunchyrollHistory();
     reachedBottom.value = reachedBottomResult;
@@ -232,6 +242,15 @@ async function startHarvest() {
     loading.value = false;
   }
 }
+
+// True while any manual/next-season link resolve is in flight - apply() must not be allowed to
+// null out the plan while one of those is still going to push its result into it (see the null
+// re-checks in linkManually/linkNextSeason below, which are the other half of this guard).
+const hasActiveLink = computed(
+  () =>
+    Object.values(linking.value).some(Boolean) ||
+    Object.values(nextSeasonLinking.value).some(Boolean),
+);
 
 async function apply() {
   if (!plan.value) return;
@@ -255,6 +274,11 @@ async function linkManually(item: CrunchyrollMatch) {
   linking.value[item.seriesId] = true;
   try {
     const linkResult = await resolveManualLink(item, url);
+    // apply() can null the plan out while this was in flight (import ran and cleared it) - the
+    // resolved link then has nowhere to go; surface that instead of dereferencing a null plan.
+    if (!plan.value) {
+      throw new Error(api.storage.lang('crunchyrollImport_LinkLoadError'));
+    }
     if (linkResult.kind === 'update') {
       plan.value.updates.push(linkResult.item);
     } else {
@@ -281,6 +305,9 @@ async function linkNextSeason(item: CrunchyrollDiffItem | CrunchyrollMissingItem
       url,
       item.nextSeason.episodeOffset,
     );
+    if (!plan.value) {
+      throw new Error(api.storage.lang('crunchyrollImport_LinkLoadError'));
+    }
     if (linkResult.kind === 'update') {
       plan.value.updates.push(linkResult.item);
     } else {

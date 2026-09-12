@@ -4,7 +4,16 @@ import { getSingle } from '../_provider/singleFactory';
 import { getSyncMode, getProviderOption } from '../_provider/helper';
 import { status } from '../_provider/definitions';
 import type { listElement } from '../_provider/listAbstract';
-import { syncItem, syncMissing, getType } from './syncHandler';
+import { syncItem, syncMissing, getType, shouldCheckDates } from './syncHandler';
+
+// getType() never returns 'MALAPI' (myanimelist.net URLs always resolve to 'MAL' there), but
+// getSyncMode() can. syncItem/syncMissing key their provider dispatch off getType()'s value
+// space, so 'MALAPI' has to collapse to 'MAL' before it's compared or passed along - same
+// normalization syncHandler.ts's own retriveLists() applies for the same reason.
+function normalizedSyncMode(type: 'anime' | 'manga'): string {
+  const mode = getSyncMode(type);
+  return mode === 'MALAPI' ? 'MAL' : mode;
+}
 
 const HISTORY_URL = 'https://www.crunchyroll.com/history';
 const START_MESSAGE = 'crunchyrollHarvestStart';
@@ -34,6 +43,13 @@ export type CrunchyrollMatch = {
   firstEpisodeDate: string | null;
   malId: number | null;
   malUrl: string | null;
+  /** The search result's own URL, already on the user's actually-configured sync provider
+   * (search() resolves the provider itself when no syncMode override is passed) - this is what
+   * a brand-new list entry must be created at. malUrl above is myanimelist.net-shaped no matter
+   * the sync provider and exists only to cross-reference the user's current MAL-keyed list; using
+   * it as the write target would always create new entries on MyAnimeList regardless of the
+   * configured provider. */
+  providerUrl: string | null;
   totalEp?: number;
 };
 
@@ -120,6 +136,14 @@ export async function harvestCrunchyrollHistory(): Promise<{
       con.error('[Crunchyroll Import] harvest reported an error, tab left open:', tabId, state);
       throw new Error(state.error || 'Harvest failed');
     }
+    if (state?.status === 'idle') {
+      // We already got an 'ok' response to START above, so a content script reporting 'idle' now
+      // means its module state was reset without us asking - most likely the user reloaded the
+      // harvest tab (the loading warning invites them to check its console). Nothing will ever
+      // finish this run; fail immediately instead of polling a dead run for the full deadline.
+      con.error('[Crunchyroll Import] harvest tab reset mid-run (reloaded?), tab:', tabId);
+      throw new Error('The Crunchyroll tab reloaded before the history finished loading');
+    }
     if (Date.now() > deadline) {
       con.error('[Crunchyroll Import] gave up polling, tab left open for inspection:', tabId);
       throw new Error('Timed out waiting for the Crunchyroll history to finish loading');
@@ -143,6 +167,14 @@ function sendOnce(tabId: number, name: string): Promise<{ ok: boolean; [key: str
       chrome.tabs.sendMessage(tabId, { name }, response => {
         const malformed = !response || typeof response.ok !== 'boolean';
         if (chrome.runtime.lastError || malformed) {
+          // "No tab with id" means the tab is gone for good (closed by the user, or by Chrome) -
+          // unlike "could not establish connection" (page still loading), no amount of retrying
+          // will ever get a response, so fail immediately with an accurate message instead of
+          // retrying for the full CONNECT_TIMEOUT_MS and then blaming a page-load timeout.
+          if (/no tab with id/i.test(chrome.runtime.lastError?.message || '')) {
+            reject(new Error('The Crunchyroll tab was closed before the history finished loading'));
+            return;
+          }
           if (Date.now() < connectDeadline) {
             setTimeout(attempt, CONNECT_RETRY_MS);
             return;
@@ -181,6 +213,7 @@ export async function matchToMal(entries: HarvestedEntry[]): Promise<Crunchyroll
       firstEpisodeDate: entry.firstEpisodeDate,
       malId: Number.isNaN(malId) ? null : malId,
       malUrl,
+      providerUrl: top?.url || null,
       totalEp: top?.totalEp,
     });
   }
@@ -219,10 +252,9 @@ type Progress = {
   finishDate?: string;
   /** Date of episode 1, if it was also found in the scraped history. */
   startDate?: string;
-  /** True whenever a finishDate was set - having a finish date is what makes an entry Completed
-   * rather than Watching (a start date isn't required: it's supplementary information, e.g. for a
-   * manually-linked continuation season the harvest can know the season finished without knowing
-   * exactly when it began). */
+  /** True once the (capped) progress reaches this entry's own last episode - independent of
+   * finishDate, since a capped possibleNextSeason case reaches the last episode without the
+   * harvest knowing exactly when that happened. */
   completed: boolean;
 };
 
@@ -236,14 +268,20 @@ function computeProgress(
   const cappedEpisode = possibleNextSeason ? (totalEp as number) : episode;
   const reachedLastEpisode = Boolean(totalEp) && cappedEpisode >= (totalEp as number);
   const startDate = firstEpisodeDate ? toIsoDate(firstEpisodeDate) : undefined;
-  const finishDate = reachedLastEpisode ? toIsoDate(date) : undefined;
+  // When capping applies, `date` is the watch date of a higher (later-season) episode, not of
+  // this season's own last episode - we don't actually know when this season finished, so leave
+  // finishDate unset rather than stamping it with a date that belongs to a different season.
+  const finishDate = reachedLastEpisode && !possibleNextSeason ? toIsoDate(date) : undefined;
 
   return {
     possibleNextSeason,
     cappedEpisode,
     finishDate,
     startDate,
-    completed: Boolean(finishDate),
+    // Completion is about reaching the last episode, not about knowing when - kept independent
+    // of finishDate so a capped season (finishDate intentionally left unset above) still gets
+    // marked Completed instead of incorrectly falling back to Watching.
+    completed: reachedLastEpisode,
   };
 }
 
@@ -266,12 +304,31 @@ export async function buildImportPlan(matches: CrunchyrollMatch[]): Promise<Crun
     if (el.malId) byMalId.set(Number(el.malId), el);
   });
 
+  // Two harvested Crunchyroll entries can independently resolve to the same provider entry (a
+  // sub/dub pair, or two title-search hits landing on the same result) - without this, both would
+  // become separate plan items sharing one malId, and applying them in sequence would let
+  // whichever syncs last silently overwrite the other's (possibly higher) episode count. Keep
+  // only the one with the most progress per malId before building the plan.
+  const dedupedMatches: CrunchyrollMatch[] = [];
+  const bestByMalId = new Map<number, CrunchyrollMatch>();
+  matches.forEach(match => {
+    if (!match.malId) {
+      dedupedMatches.push(match);
+      return;
+    }
+    const current = bestByMalId.get(match.malId);
+    if (!current || match.episode > current.episode) {
+      bestByMalId.set(match.malId, match);
+    }
+  });
+  dedupedMatches.push(...bestByMalId.values());
+
   const updates: CrunchyrollDiffItem[] = [];
   const missing: CrunchyrollMissingItem[] = [];
   const unmatched: CrunchyrollMatch[] = [];
 
-  matches.forEach(match => {
-    if (!match.malId || !match.malUrl) {
+  dedupedMatches.forEach(match => {
+    if (!match.malId || !match.malUrl || !match.providerUrl) {
       unmatched.push(match);
       return;
     }
@@ -289,11 +346,19 @@ export async function buildImportPlan(matches: CrunchyrollMatch[]): Promise<Crun
       : undefined;
 
     if (existing) {
+      // Simkl/Shikimori list snapshots never carry startDate/finishDate at all (datesSupport is
+      // false for both), so "existing.finishDate is empty" there means "this provider doesn't
+      // expose dates", not "no date is recorded" - filling it in would silently invent/overwrite
+      // provider-side state we can't actually see. shouldCheckDates() is the same gate
+      // syncHandler.ts's own list-sync diffing uses for this.
+      const canFillDates = shouldCheckDates(existing);
       const epChanged = progress.cappedEpisode > existing.watchedEp;
       const fillFinishDate =
-        progress.finishDate && !existing.finishDate ? progress.finishDate : undefined;
+        canFillDates && progress.finishDate && !existing.finishDate
+          ? progress.finishDate
+          : undefined;
       const fillStartDate =
-        progress.startDate && !existing.startDate ? progress.startDate : undefined;
+        canFillDates && progress.startDate && !existing.startDate ? progress.startDate : undefined;
 
       if (epChanged || fillFinishDate || fillStartDate || nextSeason) {
         updates.push({
@@ -322,7 +387,10 @@ export async function buildImportPlan(matches: CrunchyrollMatch[]): Promise<Crun
       missing.push({
         malId: match.malId,
         title: match.seriesTitle,
-        url: match.malUrl,
+        // The provider-native URL (not malUrl, which is always myanimelist.net-shaped) - this is
+        // what determines which provider applyCrunchyrollImport() actually writes the new entry
+        // to, via getType(item.url).
+        url: match.providerUrl,
         watchedEp: progress.cappedEpisode,
         finishDate: progress.finishDate,
         startDate: progress.startDate,
@@ -369,7 +437,10 @@ export async function resolveManualLink(
   episodeOffset = 0,
 ): Promise<ManualLinkResult> {
   const trimmedUrl = url.trim();
-  const expectedSyncMode = getSyncMode('anime');
+  // Normalized the same way as syncType below - getType() can never return 'MALAPI' (a
+  // myanimelist.net URL always resolves to 'MAL' there), so comparing against the raw
+  // getSyncMode() result would reject every valid link when the user's mode is 'MALAPI'.
+  const expectedSyncMode = normalizedSyncMode('anime');
 
   let syncType: string;
   try {

@@ -264,11 +264,24 @@ async function scrollCollecting(collect: () => void): Promise<boolean> {
     scrollContainer.clientHeight,
   );
 
+  // A short history that already fits on screen has nothing to scroll - that's genuinely "reached
+  // the bottom", not a failure, so short-circuit before the loop instead of letting it churn
+  // through maxNoProgressRounds for a container that was never going to move in the first place.
+  if (scrollContainer.scrollHeight <= scrollContainer.clientHeight + 4) {
+    return true;
+  }
+
   let lastScrollTop = -1;
   let noProgressRounds = 0;
   const maxAttempts = 900;
   const maxNoProgressRounds = 8;
   let reachedBottom = false;
+  // Distinguishes "scrolled for a while, then plateaued at the real end" from "never moved even
+  // once" - only the former is an actual completed harvest. Without this, findScrollContainer
+  // picking a non-functional container (e.g. a JS virtualizer that ignores scrollTop entirely)
+  // hits maxNoProgressRounds within ~20 seconds and was being reported as a successful, complete
+  // run even though nothing beyond the first ~8-10 visible items was ever collected.
+  let everMadeProgress = false;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const heightBefore = scrollContainer.scrollHeight;
@@ -291,6 +304,7 @@ async function scrollCollecting(collect: () => void): Promise<boolean> {
 
     if (grew || moved) {
       noProgressRounds = 0;
+      everMadeProgress = true;
     } else {
       noProgressRounds++;
       con.log(
@@ -311,7 +325,10 @@ async function scrollCollecting(collect: () => void): Promise<boolean> {
       // eslint-disable-next-line no-await-in-loop
       await utils.wait(1500);
       collect();
-      if (scrollContainer.scrollHeight > heightBefore) noProgressRounds = 0;
+      if (scrollContainer.scrollHeight > heightBefore) {
+        noProgressRounds = 0;
+        everMadeProgress = true;
+      }
     }
 
     if (noProgressRounds >= maxNoProgressRounds) {
@@ -322,8 +339,14 @@ async function scrollCollecting(collect: () => void): Promise<boolean> {
         scrollContainer.scrollTop,
         'scrollHeight:',
         scrollContainer.scrollHeight,
+        'everMadeProgress:',
+        everMadeProgress,
       );
-      reachedBottom = true;
+      // Only a run that actually scrolled for a while and then plateaued counts as reaching the
+      // real end - if scrollTop/scrollHeight never moved even once, the container we're driving
+      // likely isn't the real one (see findScrollContainer's own comment), and reporting success
+      // here would hide a total capture failure behind a "Nothing new found" result.
+      reachedBottom = everMadeProgress;
       break;
     }
   }
