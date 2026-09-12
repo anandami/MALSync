@@ -33,15 +33,6 @@ function episodeNumber($c: ChibiGenerator<unknown>) {
   );
 }
 
-// Pulls the series id out of /video/watch/{seriesId}/{episodeId} (the confirmed
-// real path) or a bare /watch/{id}. Not a fixed path-segment index: testing
-// the equivalent Prime Video URLs live turned up a locale-prefixed variant
-// (/-/{locale}/detail/{id}) that a fixed index would misread, so this reads
-// the id relative to "video/watch/"/"watch/" wherever it lands in the path.
-function currentId($c: ChibiGenerator<unknown>) {
-  return $c.url().regex('(?:video/watch|watch)/([^/?#]+)', 1);
-}
-
 export const HBOMax: PageInterface = {
   name: 'HBOMax',
   domain,
@@ -73,7 +64,13 @@ export const HBOMax: PageInterface = {
         .run();
     },
     getOverviewUrl($c) {
-      return $c.string(`${domain}/series/`).concat(currentId($c).run()).run();
+      // Unlike the /video/watch/ playback path above, a `/series/{id}` overview page was never
+      // actually confirmed live (Prime Video's equivalent /detail/{id} path was). Guessing it
+      // wrong would give the "continue watching" quick-link a 404 instead of a working page, so
+      // this falls back to the current (confirmed-real) URL - always valid, if less ideal than a
+      // true overview page. Replace with the real overview path once confirmed against a live
+      // account.
+      return $c.url().run();
     },
     getEpisode($c) {
       return episodeNumber($c).run();
