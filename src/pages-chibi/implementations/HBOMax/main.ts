@@ -84,12 +84,19 @@ export const HBOMax: PageInterface = {
       return $c.addStyle(require('./style.less?raw').toString()).run();
     },
     ready($c) {
-      return $c
-        .detectURLChanges($c.trigger().run(), { ignoreQuery: true, ignoreAnchor: true })
-        .detectChanges($c.querySelector(TITLE_SELECTOR).text().run(), $c.trigger().run())
-        .domReady()
-        .trigger()
-        .run();
+      return (
+        $c
+          .detectURLChanges($c.trigger().run(), { ignoreQuery: true, ignoreAnchor: true })
+          .detectChanges($c.querySelector(TITLE_SELECTOR).text().run(), $c.trigger().run())
+          // Confirmed live on Prime Video's identical player layout that the URL and the title
+          // element can both stay unchanged across a same-series episode advance (only this
+          // episode-info text changes) - watching it here too as a safety net, since HBO Max's own
+          // URL behavior between episodes hasn't been confirmed either way yet.
+          .detectChanges($c.querySelector(SEASON_EPISODE_SELECTOR).text().run(), $c.trigger().run())
+          .domReady()
+          .trigger()
+          .run()
+      );
     },
   },
 };

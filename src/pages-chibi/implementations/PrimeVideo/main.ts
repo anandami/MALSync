@@ -50,10 +50,12 @@ export const PrimeVideo: PageInterface = {
       return $c.querySelector(TITLE_SELECTOR).ifNotReturn().text().trim().ifNotReturn().run();
     },
     getIdentifier($c) {
-      // Title-based (not the id in the /watch/ URL): that id is not
-      // confirmed stable across episodes of the same series, while the
-      // series title is. Using an unstable id would silently break episode
-      // progress tracking between episodes.
+      // Title-based rather than the id in the /watch//detail/ URL. Confirmed
+      // live that the id is actually stable within a season (unchanged from
+      // episode 1 through episode 10 of the same season, reached via the
+      // in-player "next episode" button) - the original caution about it was
+      // wrong - but the title is equally reliable and this was already
+      // written and working, so left as-is rather than churning it.
       return $c
         .this('sync.getTitle')
         .slugify()
@@ -84,12 +86,21 @@ export const PrimeVideo: PageInterface = {
       return $c.addStyle(require('./style.less?raw').toString()).run();
     },
     ready($c) {
-      return $c
-        .detectURLChanges($c.trigger().run(), { ignoreQuery: true, ignoreAnchor: true })
-        .detectChanges($c.querySelector(TITLE_SELECTOR).text().run(), $c.trigger().run())
-        .domReady()
-        .trigger()
-        .run();
+      return (
+        $c
+          .detectURLChanges($c.trigger().run(), { ignoreQuery: true, ignoreAnchor: true })
+          .detectChanges($c.querySelector(TITLE_SELECTOR).text().run(), $c.trigger().run())
+          // Confirmed live: clicking the in-player "next episode" button changes
+          // neither the URL nor the title element (both stay identical from
+          // episode 1 through episode 10 of the same season) - only this episode
+          // info text does. Without watching it directly, MALSync would never
+          // notice a same-series episode advance and would stop syncing after
+          // the first episode of a viewing session.
+          .detectChanges($c.querySelector(EPISODE_INFO_SELECTOR).text().run(), $c.trigger().run())
+          .domReady()
+          .trigger()
+          .run()
+      );
     },
   },
 };
