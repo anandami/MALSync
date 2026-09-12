@@ -13,19 +13,25 @@ module.exports = {
     let traktSecret = '41HDqf0Jmmbl38_YYaUrKYvB_uTrFKc1NsrPTCuXa2k';
 
     if (mode === 'travis') {
-      if (!process.env.SIMKL_API_ID || !process.env.SIMKL_API_SECRET || !process.env.MANGABAKA_API_ID || !process.env.MANGABAKA_API_SECRET) {
-        throw new Error('SIMKL_API_ID, SIMKL_API_SECRET, MANGABAKA_API_ID and MANGABAKA_API_SECRET are not set');
+      if (
+        !process.env.SIMKL_API_ID ||
+        !process.env.SIMKL_API_SECRET ||
+        !process.env.MANGABAKA_API_ID ||
+        !process.env.MANGABAKA_API_SECRET ||
+        !process.env.TRAKT_API_ID ||
+        !process.env.TRAKT_API_SECRET
+      ) {
+        throw new Error(
+          'SIMKL_API_ID, SIMKL_API_SECRET, MANGABAKA_API_ID, MANGABAKA_API_SECRET, TRAKT_API_ID and TRAKT_API_SECRET are not set',
+        );
       }
 
       simklId = process.env.SIMKL_API_ID;
       simklSecret = process.env.SIMKL_API_SECRET;
       mangabakaId = process.env.MANGABAKA_API_ID;
       mangabakaSecret = process.env.MANGABAKA_API_SECRET;
-
-      if (process.env.TRAKT_API_ID && process.env.TRAKT_API_SECRET) {
-        traktId = process.env.TRAKT_API_ID;
-        traktSecret = process.env.TRAKT_API_SECRET;
-      }
+      traktId = process.env.TRAKT_API_ID;
+      traktSecret = process.env.TRAKT_API_SECRET;
     }
 
     return {
@@ -41,6 +47,6 @@ module.exports = {
         id: traktId,
         secret: traktSecret,
       },
-    }
-  }
+    };
+  },
 };

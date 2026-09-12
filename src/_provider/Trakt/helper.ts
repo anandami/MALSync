@@ -497,7 +497,13 @@ export function groupFlatEpisodesBySeason(
   const grouped = new Map<number, number[]>();
   for (let i = from; i <= to; i++) {
     const mapped = mapFlatEpisodeToSeason(i, seasonsMeta);
-    if (!mapped) continue;
+    if (!mapped) {
+      // Flat episode number exceeds every known season's total - silently skipping it would
+      // under-report progress with nothing pointing at why, if a consolidated franchise's summed
+      // MAL watched-count ever exceeds Trakt's own known total episode count.
+      con.error('[Trakt] flat episode has no matching season, skipped:', i, seasonsMeta);
+      continue;
+    }
     if (!grouped.has(mapped.season)) grouped.set(mapped.season, []);
     (grouped.get(mapped.season) as number[]).push(mapped.episode);
   }

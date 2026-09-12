@@ -106,24 +106,24 @@ export class Single extends SingleAbstract {
     throw new Error('Trakt does not support Start Date');
   }
 
-  _setStartDate(_startDate: definitions.startFinishDate): void {
-    // no-op: Trakt does not support Start Date
+  _setStartDate(_startDate: definitions.startFinishDate): never {
+    throw new Error('Trakt does not support Start Date');
   }
 
   _getFinishDate(): never {
     throw new Error('Trakt does not support Finish Date');
   }
 
-  _setFinishDate(_finishDate: definitions.startFinishDate): void {
-    // no-op: Trakt does not support Finish Date
+  _setFinishDate(_finishDate: definitions.startFinishDate): never {
+    throw new Error('Trakt does not support Finish Date');
   }
 
   _getRewatchCount(): never {
     throw new Error('Trakt does not support Rewatch Count');
   }
 
-  _setRewatchCount(_rewatchCount: definitions.rewatchCount): void {
-    // no-op: Trakt does not support Rewatch Count
+  _setRewatchCount(_rewatchCount: definitions.rewatchCount): never {
+    throw new Error('Trakt does not support Rewatch Count');
   }
 
   _getScore(): definitions.score {

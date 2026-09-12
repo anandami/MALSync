@@ -611,6 +611,11 @@ function scheduleTraktPoll(delayMs: number) {
     }
     try {
       const result = await traktHelper.pollDeviceToken(traktDevice.value.device_code);
+      // Re-check after the await: cancelTraktAuth() can null traktDevice.value while this
+      // request is in flight, and a request that started before Cancel can still resolve
+      // successfully afterward - without this, clicking Cancel wouldn't actually stop
+      // authentication from silently completing once that in-flight poll comes back.
+      if (!traktDevice.value) return;
       // 'network' = connection hiccup; the code is still valid on Trakt's
       // side, so keep polling until the code's own deadline instead of
       // killing the flow.
