@@ -61,35 +61,46 @@ function messageHandler(
 }
 
 function videoTimeAction(message: videoTime, sender, sendResponse) {
-  chrome.tabs.sendMessage(sender.tab.id, {
-    action: 'videoTime',
-    item: message.item,
-    sender,
-  });
+  // Fire-and-forget relay to another tab/frame's player - that receiver can legitimately be gone
+  // (navigated away, or its content script severed by an extension reload while video was still
+  // playing and sending updates). Without a .catch(), a rejected "Could not establish connection"
+  // promise here becomes an uncaught rejection - and since this fires on every video time update,
+  // it can flood the console with them for as long as the sender keeps ticking.
+  chrome.tabs
+    .sendMessage(sender.tab.id, {
+      action: 'videoTime',
+      item: message.item,
+      sender,
+    })
+    .catch(() => {});
   return undefined;
 }
 
 function contentAction(message: content, sender, sendResponse) {
-  chrome.tabs.sendMessage(sender.tab.id, {
-    action: 'content',
-    item: message.item,
-    sender,
-  });
+  chrome.tabs
+    .sendMessage(sender.tab.id, {
+      action: 'content',
+      item: message.item,
+      sender,
+    })
+    .catch(() => {});
   return undefined;
 }
 
 function videoTimeSetAction(message: videoTimeSet, sender, sendResponse) {
   if (!message.sender?.tab?.id) return undefined;
 
-  chrome.tabs.sendMessage(
-    message.sender.tab.id,
-    {
-      action: 'videoTimeSet',
-      time: message.time,
-      timeAdd: message.timeAdd,
-    },
-    { frameId: message.sender.frameId },
-  );
+  chrome.tabs
+    .sendMessage(
+      message.sender.tab.id,
+      {
+        action: 'videoTimeSet',
+        time: message.time,
+        timeAdd: message.timeAdd,
+      },
+      { frameId: message.sender.frameId },
+    )
+    .catch(() => {});
 
   return undefined;
 }

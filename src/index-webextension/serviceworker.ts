@@ -25,11 +25,11 @@ try {
   con.error(e);
 }
 
-try {
-  initCustomDomain();
-} catch (e) {
-  con.error(e);
-}
+// initCustomDomain/initDatabase are async - a synchronous try/catch around a bare call only
+// catches a throw before the first await inside them, never a later rejection. Left uncaught,
+// that becomes an unhandled promise rejection in the service worker instead of the intended
+// "log and keep starting up" behavior every other init call here gets.
+initCustomDomain().catch(e => con.error(e));
 
 try {
   initSyncTags();
@@ -37,11 +37,7 @@ try {
   con.error(e);
 }
 
-try {
-  initDatabase();
-} catch (e) {
-  con.error(e);
-}
+initDatabase().catch(e => con.error(e));
 
 try {
   listSyncInit();

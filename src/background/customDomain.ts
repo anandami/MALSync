@@ -29,7 +29,34 @@ function updateListener() {
   });
 }
 
-async function registerScripts() {
+// registerScripts() is triggered from three independent places (initCustomDomain, the
+// permissions.onAdded/onRemoved listeners, and the settings/customDomains storage watcher) and
+// each run unregisters every script before re-registering all ~200+ of them. Two runs overlapping
+// (e.g. reloading the extension while a permission change is also being processed) race: the
+// second run's registerContentScripts calls can land while the first run's own registration is
+// still in flight, producing a flood of "Duplicate script ID" failures and leaving some domains
+// without their content script until the next clean run. This queue guarantees at most one
+// unregister+register cycle runs at a time, folding any calls that arrive while busy into a single
+// extra run afterward instead of letting them race.
+let registerScriptsInFlight: Promise<void> | null = null;
+let registerScriptsQueued = false;
+
+function registerScripts(): Promise<void> {
+  if (registerScriptsInFlight) {
+    registerScriptsQueued = true;
+    return registerScriptsInFlight;
+  }
+  registerScriptsInFlight = registerScriptsImpl().finally(() => {
+    registerScriptsInFlight = null;
+    if (registerScriptsQueued) {
+      registerScriptsQueued = false;
+      registerScripts();
+    }
+  });
+  return registerScriptsInFlight;
+}
+
+async function registerScriptsImpl() {
   if (typeof chrome.scripting === 'undefined') {
     con.error('Custom Domain is not possible');
     return;
