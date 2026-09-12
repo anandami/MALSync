@@ -1,0 +1,17 @@
+{
+  "title": "PrimeVideo",
+  "url": "https://www.primevideo.com",
+  "testCases": [
+    {
+      "url": "https://www.primevideo.com/detail/0MRWXUDE3L303XFEJRNWB20S3O?jic=8%7CEgNhbGw%3D&ref_=atv_hm_hom_c_4qpoT6_5_2",
+      "expected": {
+        "sync": true,
+        "title": "THE GHOST IN THE SHELL",
+        "identifier": "the-ghost-in-the-shell?s=1",
+        "overviewUrl": "https://www.primevideo.com/detail/0MRWXUDE3L303XFEJRNWB20S3O",
+        "episode": 1,
+        "uiSelector": false
+      }
+    }
+  ]
+}

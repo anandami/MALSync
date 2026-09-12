@@ -1,0 +1,39 @@
+{
+  "title": "HBOMax",
+  "url": "https://play.hbomax.com",
+  "testCases": [
+    {
+      "url": "https://play.hbomax.com/video/watch/a7e946b0-9ae0-4712-a722-6fef802f1bea",
+      "expected": {
+        "sync": true,
+        "title": "Naruto",
+        "identifier": "naruto?s=1",
+        "overviewUrl": "https://play.hbomax.com/video/watch/a7e946b0-9ae0-4712-a722-6fef802f1bea",
+        "episode": 1,
+        "uiSelector": false
+      }
+    },
+    {
+      "url": "https://play.hbomax.com/video/watch/272f3d83-92cd-4877-8b8d-4b0a476cc877",
+      "expected": {
+        "sync": true,
+        "title": "Naruto",
+        "identifier": "naruto?s=1",
+        "overviewUrl": "https://play.hbomax.com/video/watch/272f3d83-92cd-4877-8b8d-4b0a476cc877",
+        "episode": 2,
+        "uiSelector": false
+      }
+    },
+    {
+      "url": "https://play.hbomax.com/video/watch/efcf20e8-ce0d-47c5-af32-3ce6add8379c",
+      "expected": {
+        "sync": true,
+        "title": "Naruto",
+        "identifier": "naruto?s=1",
+        "overviewUrl": "https://play.hbomax.com/video/watch/efcf20e8-ce0d-47c5-af32-3ce6add8379c",
+        "episode": 52,
+        "uiSelector": false
+      }
+    }
+  ]
+}
