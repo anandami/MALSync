@@ -172,10 +172,14 @@ export function missingCheck(item, missing, types, mode) {
 
 // Sync
 
-export async function syncList(list, thisMissing) {
+// `shouldSync` lets a caller restrict a run to a subset of malIds (e.g. "just
+// these two titles, to verify before trusting the rest") without touching
+// list/thisMissing themselves - skipped entries keep their diff/missing
+// state exactly as-is, ready for a later full run.
+export async function syncList(list, thisMissing, shouldSync?: (malId: number) => boolean) {
   for (const i in list) {
     const el = list[i];
-    if (el.diff) {
+    if (el.diff && (!shouldSync || shouldSync(Number(i)))) {
       try {
         await syncListItem(el);
         el.diff = false;
@@ -188,6 +192,7 @@ export async function syncList(list, thisMissing) {
   const missing = thisMissing.slice();
   for (const i in missing) {
     const miss = missing[i];
+    if (shouldSync && !shouldSync(miss.malId)) continue;
     con.log('Sync missing', miss);
     await syncMissing(miss)
       .then(() => {
