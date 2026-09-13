@@ -92,7 +92,13 @@ export const HBOMax: PageInterface = {
           // element can both stay unchanged across a same-series episode advance (only this
           // episode-info text changes) - watching it here too as a safety net, since HBO Max's own
           // URL behavior between episodes hasn't been confirmed either way yet.
-          .detectChanges($c.querySelector(SEASON_EPISODE_SELECTOR).text().run(), $c.trigger().run())
+          // ifNotReturn() is required: this element lives in the player's control overlay, which
+          // gets removed from the DOM whenever the controls auto-hide during normal playback -
+          // without it, .text() on the resulting null throws every 500ms while controls are hidden.
+          .detectChanges(
+            $c.querySelector(SEASON_EPISODE_SELECTOR).ifNotReturn().text().run(),
+            $c.trigger().run(),
+          )
           .domReady()
           .trigger()
           .run()

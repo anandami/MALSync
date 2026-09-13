@@ -96,7 +96,15 @@ export const PrimeVideo: PageInterface = {
           // info text does. Without watching it directly, MALSync would never
           // notice a same-series episode advance and would stop syncing after
           // the first episode of a viewing session.
-          .detectChanges($c.querySelector(EPISODE_INFO_SELECTOR).text().run(), $c.trigger().run())
+          // ifNotReturn() is required here (unlike the title above): this
+          // element lives in the player's control overlay, which Prime Video
+          // removes from the DOM whenever the controls auto-hide during
+          // normal playback - without it, .text() on the resulting null
+          // throws every 500ms for as long as the controls stay hidden.
+          .detectChanges(
+            $c.querySelector(EPISODE_INFO_SELECTOR).ifNotReturn().text().run(),
+            $c.trigger().run(),
+          )
           .domReady()
           .trigger()
           .run()
