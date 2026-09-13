@@ -160,7 +160,34 @@ export class SyncPage {
     this.searchObj = searchObj;
   }
 
-  async handlePage(curUrl = window.location.href) {
+  private handlePageInFlight: Promise<void> | null = null;
+
+  private handlePageQueuedUrl: string | undefined;
+
+  // Overlapping runs (a new page-state trigger firing while a previous
+  // handlePage() is still awaiting something) used to race on this.searchObj -
+  // one run's setSearchObj(undefined) could null it out while another run was
+  // mid-await, throwing "Cannot read properties of undefined" from whatever
+  // ran next on the stale reference. Serialize runs and coalesce anything that
+  // arrives while one is in flight into a single follow-up.
+  async handlePage(curUrl = window.location.href): Promise<void> {
+    if (this.handlePageInFlight) {
+      this.handlePageQueuedUrl = curUrl;
+      return this.handlePageInFlight;
+    }
+
+    this.handlePageInFlight = this.handlePageImpl(curUrl).finally(() => {
+      this.handlePageInFlight = null;
+      if (typeof this.handlePageQueuedUrl !== 'undefined') {
+        const queuedUrl = this.handlePageQueuedUrl;
+        this.handlePageQueuedUrl = undefined;
+        this.handlePage(queuedUrl);
+      }
+    });
+    return this.handlePageInFlight;
+  }
+
+  private async handlePageImpl(curUrl = window.location.href) {
     if (this.correctionPopupOpen) {
       logger.log('Correction popup is open, skipping re-check until it closes');
       return;
