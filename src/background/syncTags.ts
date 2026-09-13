@@ -5,7 +5,7 @@ function saveInList(key, el) {
   con.info('Save', key, 'in sync list [', el, ']');
   return api.storage.get('list-tagSettings').then(list => {
     try {
-      list = JSON.parse(list);
+      list = JSON.parse(list || '[]');
       if (!Array.isArray(list)) throw 'Not an array';
     } catch (e) {
       con.error(e);
@@ -41,7 +41,7 @@ function importList() {
     .get('list-tagSettings')
     .then(async list => {
       try {
-        list = JSON.parse(list);
+        list = JSON.parse(list || '[]');
       } catch (e) {
         con.error(e);
         list = [];
