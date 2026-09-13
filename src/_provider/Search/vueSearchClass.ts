@@ -19,6 +19,7 @@ export class SearchClass extends SearchClassExtend {
   }
 
   public openCorrection(syncMode = false): Promise<boolean> {
+    const syncPage = this.getSyncPage();
     return new Promise((resolve, reject) => {
       if (this.vueInstance) {
         // A background re-check (syncMode) must not tear down and replace a
@@ -30,6 +31,8 @@ export class SearchClass extends SearchClassExtend {
         resolve(false);
         return;
       }
+
+      if (syncPage) syncPage.correctionPopupOpen = true;
 
       const flasmessage = utils.flashm('<div class="ms-shadow"></div>', {
         permanent: true,
@@ -43,6 +46,7 @@ export class SearchClass extends SearchClassExtend {
       this.vueInstance.searchClass = this;
       this.vueInstance.syncMode = syncMode;
       this.vueInstance.unmountFnc = () => {
+        if (syncPage) syncPage.correctionPopupOpen = false;
         resolve(this.changed);
         flasmessage.remove();
         this.vueInstance = undefined;

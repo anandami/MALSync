@@ -38,6 +38,11 @@ export class SyncPage {
 
   trackingModeInstance: TrackingModeInterface | undefined;
 
+  // Set by SearchClass.openCorrection() while its popup is showing. A fresh
+  // handlePage() run would otherwise build a brand new SearchClass (and popup)
+  // on top of it, tearing down whatever the user is mid-typing.
+  correctionPopupOpen = false;
+
   public novel = false;
 
   public strongVolumes = false;
@@ -156,6 +161,11 @@ export class SyncPage {
   }
 
   async handlePage(curUrl = window.location.href) {
+    if (this.correctionPopupOpen) {
+      logger.log('Correction popup is open, skipping re-check until it closes');
+      return;
+    }
+
     let state: pageState;
     this.curState = undefined;
     this.setSearchObj(undefined);

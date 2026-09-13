@@ -16,7 +16,7 @@
 
       <input-button
         v-if="!syncMode"
-        label="URL"
+        :label="urlLabel"
         :state="searchClass.getUrl()"
         @clicked="setPage"
       ></input-button>
@@ -69,6 +69,9 @@ import inputButton from './components/inputButton.vue';
 import entry from './components/entry.vue';
 import rules from './components/rules.vue';
 import { hideFloatbutton, showFloatbutton } from '../../floatbutton/init';
+import { providerTemplates } from '../../provider/templates';
+import { urlToSlug } from '../../utils/slugs';
+import { getSyncMode } from '../helper';
 
 export default {
   components: {
@@ -102,6 +105,10 @@ export default {
     offset() {
       return this.searchClass.getOffset();
     },
+    urlLabel() {
+      const { shortName } = providerTemplates(this.searchClass.getNormalizedType());
+      return this.lang('correction_UrlLabel', [shortName]);
+    },
     episodeWindow() {
       let start = this.currentStateEp + parseInt(this.inputOffset) - 2;
       if (start < 1) start = 1;
@@ -127,9 +134,21 @@ export default {
   methods: {
     lang: api.storage.lang,
     setPage(url, id = 0) {
+      if (url && !this.isValidUrl(url)) {
+        const { shortName } = providerTemplates(this.searchClass.getNormalizedType());
+        utils.flashm(this.lang('correction_InvalidUrl', [shortName]), { error: true });
+        return;
+      }
       this.searchClass.setUrl(url, id);
       utils.flashm(api.storage.lang('correction_NewUrl', [url]));
       this.close();
+    },
+    isValidUrl(url) {
+      const slug = urlToSlug(url);
+      if (!slug.path) return false;
+      const syncMode = getSyncMode(this.searchClass.getNormalizedType());
+      const expectedProvider = syncMode === 'MALAPI' ? 'MAL' : syncMode;
+      return slug.path.provider === expectedProvider;
     },
     setOffset(offset) {
       this.searchClass.setOffset(offset);

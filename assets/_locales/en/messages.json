@@ -535,6 +535,26 @@
         "message": "Only change this URL if it points to the wrong anime page on MAL.",
         "description": "URL is Wrong"
     },
+    "correction_UrlLabel": {
+        "message": "$page$ URL",
+        "description": "Label for the URL correction field, names the currently active sync provider",
+        "placeholders": {
+            "page": {
+                "content": "$1",
+                "example": "MAL"
+            }
+        }
+    },
+    "correction_InvalidUrl": {
+        "message": "This doesn't look like a $page$ URL.",
+        "description": "Shown when a pasted correction URL doesn't match the active sync provider",
+        "placeholders": {
+            "page": {
+                "content": "$1",
+                "example": "MAL"
+            }
+        }
+    },
     "correction_Search": {
         "message": "Correction Search",
         "description": "Correction Search"
