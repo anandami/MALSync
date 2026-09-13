@@ -21,11 +21,14 @@ export class SearchClass extends SearchClassExtend {
   public openCorrection(syncMode = false): Promise<boolean> {
     return new Promise((resolve, reject) => {
       if (this.vueInstance) {
-        this.vueInstance.$.appContext.app.unmount();
+        // A background re-check (syncMode) must not tear down and replace a
+        // popup the user already has open - that wiped out in-progress typing.
+        // Only an explicit manual re-trigger toggles it closed.
         if (!syncMode) {
-          resolve(false);
-          return;
+          this.vueInstance.$.appContext.app.unmount();
         }
+        resolve(false);
+        return;
       }
 
       const flasmessage = utils.flashm('<div class="ms-shadow"></div>', {

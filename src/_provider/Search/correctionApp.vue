@@ -112,7 +112,15 @@ export default {
     this.minimized = api.settings.get('minimizeBigPopup');
     if (api.settings.get('floatButtonCorrection')) hideFloatbutton(true);
   },
+  mounted() {
+    // Deferred so the click that opened this popup doesn't immediately bubble
+    // to document and close it again.
+    setTimeout(() => {
+      document.addEventListener('click', this.handleOutsideClick, true);
+    }, 0);
+  },
   unmounted() {
+    document.removeEventListener('click', this.handleOutsideClick, true);
     this.unmountFnc();
     showFloatbutton();
   },
@@ -128,6 +136,11 @@ export default {
     },
     close() {
       this.$.appContext.app.unmount();
+    },
+    handleOutsideClick(e: MouseEvent) {
+      if (this.$el instanceof Node && !e.composedPath().includes(this.$el)) {
+        this.close();
+      }
     },
     calcEpOffset(ep) {
       return parseInt(ep) - parseInt(this.inputOffset);
